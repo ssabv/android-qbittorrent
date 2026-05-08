@@ -64,10 +64,20 @@ jobs:
         cd /tmp
 
         echo "=== Downloading OpenSSL 3.4.1 static libs for arm64-v8a ==="
-        curl -fsSL "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz" -o openssl-arm64.tar.gz
+        curl -L "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz" -o openssl-arm64.tar.gz
 
-        echo "=== Extracting ==="
-        mkdir -p openssl-arm64 && tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
+        FILE_TYPE=$(file openssl-arm64.tar.gz)
+        echo "=== File type: $FILE_TYPE ==="
+
+        rm -rf openssl-arm64
+
+        if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"tar"* ]]; then
+          echo "=== Extracting TAR.GZ ==="
+          mkdir -p openssl-arm64 && tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
+        else
+          echo "ERROR: Unknown archive format"
+          exit 1
+        fi
 
         echo "=== Checking contents ==="
         ls -la openssl-arm64/
@@ -107,14 +117,30 @@ jobs:
         cd /tmp
 
         echo "=== Downloading Boost 1.87.0 static libs for arm64-v8a (dec1/Boost-for-Android) ==="
-        curl -fsSL "https://github.com/dec1/Boost-for-Android/releases/download/ndk_27c_boost_1.87.0/ndk_27c_boost_1.87.0.zip" -o boost-arm64.zip
+        curl -L "https://github.com/dec1/Boost-for-Android/releases/download/ndk_27c_boost_1.87.0/ndk_27c_boost_1.87.0.zip" -o boost-arm64.zip
 
-        echo "=== Extracting ==="
-        mkdir -p boost-arm64 && unzip -q boost-arm64.zip -d boost-arm64 --strip-components=1
+        FILE_TYPE=$(file boost-arm64.zip)
+        echo "=== File type: $FILE_TYPE ==="
+
+        rm -rf boost-arm64
+
+        if [[ "$FILE_TYPE" == *"Zip"* ]]; then
+          echo "=== Extracting ZIP ==="
+          unzip -q boost-arm64.zip -d boost-arm64
+          cd boost-arm64
+          if [ -d "ndk_27c_boost_1.87.0" ]; then
+            mv ndk_27c_boost_1.87.0/* ../
+            cd ..
+            rm -rf boost-arm64
+          fi
+        elif [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"tar"* ]]; then
+          echo "=== Extracting TAR.GZ ==="
+          mkdir -p boost-arm64 && tar -xzf boost-arm64.zip -C boost-arm64 --strip-components=1
+        fi
 
         echo "=== Checking contents ==="
         ls -la boost-arm64/
-        ls -la boost-arm64/libs/ 2>/dev/null || ls -la boost-arm64/lib/ 2>/dev/null || echo "Checking structure..."
+        find boost-arm64 -name "*.a" | head -10
 
         BOOST_LIB="$PWD/boost-arm64/libs/arm64-v8a"
         if [ ! -d "$BOOST_LIB" ]; then
