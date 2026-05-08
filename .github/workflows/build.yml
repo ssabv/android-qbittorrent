@@ -15,6 +15,9 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
+      # -----------------------
+      # Stage 1: Environment Setup
+      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -30,18 +33,25 @@ jobs:
           sudo apt-get install -y unzip wget
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          mkdir -p $ANDROID_HOME/cmdline-tools/latest/bin 2>/dev/null || true
-          touch $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 2>/dev/null || true
 
+      # -----------------------
+      # Stage 2: Download OpenSSL (prebuilt)
+      # -----------------------
       - name: Download OpenSSL
         run: |
+          echo "=== Downloading OpenSSL for Android arm64-v8a ==="
           cd /tmp
           curl -L -o openssl.tar.gz "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz"
           mkdir -p openssl-arm64
           tar -xzf openssl.tar.gz -C openssl-arm64 --strip-components=1
+          ls -la openssl-arm64/lib/
 
-      - name: Build native lib
+      # -----------------------
+      # Stage 3: Build native library
+      # -----------------------
+      - name: Build libqbcore.so
         run: |
+          echo "=== Building libqbcore.so ==="
           cd $GITHUB_WORKSPACE/app/src/main/cpp
           mkdir -p build
           cd build
@@ -55,21 +65,33 @@ jobs:
           
           cmake --build . --target qbcore
           
+          echo "=== libqbcore.so built ==="
           ls -lh libqbcore.so
-          readelf -d libqbcore.so | grep -E "NEEDED|Library"
 
+      # -----------------------
+      # Stage 3: Copy to jniLibs
+      # -----------------------
       - name: Copy to jniLibs
         run: |
           mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-          cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so \
+             $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
           ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
 
+      # -----------------------
+      # Stage 4: Build APK
+      # -----------------------
       - name: Build APK
         run: |
+          echo "=== Building APK ==="
           cd $GITHUB_WORKSPACE/app
+          ls -la ../src/main/jniLibs/arm64-v8a/
           ./gradlew assembleDebug --no-daemon 2>&1 | tail -30
 
-      - name: Upload APK
+      # -----------------------
+      # Stage 4: Upload APK artifact
+      # -----------------------
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
