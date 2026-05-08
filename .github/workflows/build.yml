@@ -12,29 +12,66 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      NDK: /usr/local/lib/android/sdk/ndk/27.0.12077973
-      ANDROID_API: 35
-      ABI: arm64-v8a
     steps:
-- name: Checkout code
+      - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Download native artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          name: android-native-libqbcore
-          path: app/src/main/jniLibs/arm64-v8a
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          mkdir -p $ANDROID_HOME/cmdline-tools/latest/bin 2>/dev/null || true
+          touch $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 2>/dev/null || true
+
+      - name: Download OpenSSL
+        run: |
+          cd /tmp
+          curl -L -o openssl.tar.gz "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz"
+          mkdir -p openssl-arm64
+          tar -xzf openssl.tar.gz -C openssl-arm64 --strip-components=1
+
+      - name: Build native lib
+        run: |
+          cd $GITHUB_WORKSPACE/app/src/main/cpp
+          mkdir -p build
+          cd build
+          
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=/usr/local/lib/android/sdk/ndk/27.0.12077973/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DANDROID_STL=c++_shared \
+            -DOPENSSL_DIR=/tmp/openssl-arm64
+          
+          cmake --build . --target qbcore
+          
+          ls -lh libqbcore.so
+          readelf -d libqbcore.so | grep -E "NEEDED|Library"
+
+      - name: Copy to jniLibs
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+          cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
 
       - name: Build APK
         run: |
-          cd app
-          ./gradlew assembleDebug
+          cd $GITHUB_WORKSPACE/app
+          ./gradlew assembleDebug --no-daemon 2>&1 | tail -30
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
