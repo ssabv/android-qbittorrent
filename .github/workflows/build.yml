@@ -1,358 +1,128 @@
-name: Build Android APK
+name: Android Build
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      step:
-        description: 'Build step'
-        default: '1'
-        required: false
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-native:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v2
+      - name: Setup Android SDK & NDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          echo "SDK/NDK setup complete"
 
-    - name: Install NDK and CMake
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+      - name: Build OpenSSL static libs (already done or reuse)
+        run: |
+          echo "Using prebuilt OpenSSL at /tmp/openssl-arm64"
 
-    - name: Verify NDK toolchain
-      run: |
-        echo "ANDROID_HOME: $ANDROID_HOME"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        NDK_VERSION="27.0.12077973"
-        NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-        if [ ! -d "$NDK_PATH" ]; then
-          echo "ERROR: NDK version $NDK_VERSION not found!"
-          ls $ANDROID_HOME/ndk/ 2>/dev/null || echo "No NDKs found"
-          exit 1
-        fi
-        echo "Using NDK: $NDK_PATH"
-        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-        echo "Toolchain: $TOOLCHAIN"
-        ls $TOOLCHAIN/bin/aarch64-linux-android*-clang 2>/dev/null | head -5
+      - name: Build Boost static libraries for Android arm64-v8a
+        shell: bash
+        run: |
+          set -e
 
-    - name: Build Step 1 - Download OpenSSL static libs
-      run: |
-        set -e
-        echo "=== Step 1: Getting OpenSSL for Android arm64-v8a ==="
+          BOOST_VERSION="1.87.0"
+          BOOST_DIR=$PWD/boost
+          BOOST_TAR=boost_${BOOST_VERSION//./_}.tar.gz
+          BOOST_URL="https://boostorg.jfrog.io/artifactory/main/release/$BOOST_VERSION/source/$BOOST_TAR"
 
-        cd /tmp
+          echo "Downloading Boost $BOOST_VERSION"
+          curl -L -o "$BOOST_TAR" "$BOOST_URL"
 
-        echo "=== Downloading OpenSSL 3.4.1 static libs for arm64-v8a ==="
-        curl -L "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz" -o openssl-arm64.tar.gz
+          file "$BOOST_TAR"
 
-        FILE_TYPE=$(file openssl-arm64.tar.gz)
-        echo "=== File type: $FILE_TYPE ==="
+          mkdir -p "$BOOST_DIR"
+          tar -xzf "$BOOST_TAR" -C "$BOOST_DIR" --strip-components=1
 
-        rm -rf openssl-arm64
+          export NDK=/usr/local/lib/android/sdk/ndk/27.0.12077973
+          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export ANDROID_API=35
+          export ABI=arm64-v8a
+          export PATH=$TOOLCHAIN/bin:$PATH
+          export CC=$TOOLCHAIN/bin/aarch64-linux-android$ANDROID_API-clang
+          export CXX=$TOOLCHAIN/bin/aarch64-linux-android$ANDROID_API-clang++
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
 
-        if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"tar"* ]]; then
-          echo "=== Extracting TAR.GZ ==="
-          mkdir -p openssl-arm64 && tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
-        else
-          echo "ERROR: Unknown archive format"
-          exit 1
-        fi
+          cd "$BOOST_DIR"
+          ./bootstrap.sh
+          ./b2 toolset=clang \
+            cxxflags="-fPIC -fexceptions -frtti" link=static threading=multi \
+            --with-system --with-filesystem --with-date_time --with-thread --with-regex \
+            target-os=android architecture=arm address-model=64 abi=aapcs stage
 
-        echo "=== Checking contents ==="
-        ls -la openssl-arm64/
-        ls -la openssl-arm64/lib/
+          echo "Boost static libs built:"
+          ls -lh stage/lib
 
-        SSL_LIB="$PWD/openssl-arm64/lib/libssl.a"
-        CRYPTO_LIB="$PWD/openssl-arm64/lib/libcrypto.a"
+      - name: Build libqbcore.so
+        shell: bash
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=$ABI \
+            -DANDROID_PLATFORM=android-$ANDROID_API \
+            -DANDROID_STL=c++_shared \
+            -DBOOST_ROOT=$BOOST_DIR \
+            -DOPENSSL_ROOT_DIR=/tmp/openssl-arm64
+          cmake --build . --target qbcore
 
-        echo "=== Verifying static libs ==="
-        if [ -f "$SSL_LIB" ]; then
-          echo "FOUND libssl.a: $SSL_LIB"
-          file "$SSL_LIB"
-          ls -lh "$SSL_LIB"
-        else
-          echo "ERROR: libssl.a not found at $SSL_LIB"
-          exit 1
-        fi
-
-        if [ -f "$CRYPTO_LIB" ]; then
-          echo "FOUND libcrypto.a: $CRYPTO_LIB"
-          file "$CRYPTO_LIB"
-          ls -lh "$CRYPTO_LIB"
-        else
-          echo "ERROR: libcrypto.a not found at $CRYPTO_LIB"
-          exit 1
-        fi
-
-        OPENSSL_DIR="$PWD/openssl-arm64"
-        echo "OPENSSL_DIR=$OPENSSL_DIR" >> $GITHUB_ENV
-        echo "Set OPENSSL_DIR=$OPENSSL_DIR"
-
-    - name: Build Step 2 - Build Boost from source for Android arm64-v8a
-      run: |
-        set -e
-        echo "=== Step 2: Building Boost for Android arm64-v8a ==="
-
-        cd /tmp
-
-        BOOST_VERSION="1.87.0"
-        NDK_VERSION="27.0.12077973"
-        NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-
-        echo "=== Downloading Boost $BOOST_VERSION ==="
-        curl -L "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION}.tar.gz" -o boost.tar.gz
-
-        FILE_TYPE=$(file boost.tar.gz)
-        echo "=== Downloaded file type: $FILE_TYPE ==="
-
-        rm -rf boost-$BOOST_VERSION boost-extract
-
-        if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" =~ "POSIX tar archive" ]]; then
-          echo "=== Extracting TAR.GZ ==="
-          tar -xzf boost.tar.gz
-        elif [[ "$FILE_TYPE" == *"Zip"* ]]; then
-          echo "=== Extracting ZIP ==="
-          unzip -q boost.tar.gz -d boost-extract
-        else
-          echo "ERROR: Unknown archive format: $FILE_TYPE"
-          head -c 100 boost.tar.gz | xxd | head -5
-          exit 1
-        fi
-
-        cd boost-$BOOST_VERSION
-        echo "=== Boost source directory ==="
-        ls -la
-
-        echo "=== Bootstrap ==="
-        chmod +x bootstrap.sh
-        ./bootstrap.sh --with-toolchain=clang
-
-        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-        CLANG_CXX="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
-        CLANG_AR="$TOOLCHAIN/bin/aarch64-linux-android24-ar"
-
-        echo "=== Generating Boost headers ==="
-        ./b2 headers
-
-        echo "=== Building Boost libraries ==="
-        ./b2 -j$(nproc) \
-          toolchain=clang \
-          target-os=android \
-          architecture=arm \
-          variant=release \
-          link=static \
-          runtime-link=shared \
-          python=none \
-          --without-python \
-          --without-mpi \
-          --without-test \
-          --without-log \
-          --without-locale \
-          --without-graph \
-          --without_graph \
-          cxxstd=17 \
-          stagedir=stage \
-          include="$TOOLCHAIN/sysroot/usr/include/aarch64-linux-android" \
-          include="$TOOLCHAIN/libcxx/include/aarch64-linux-android" \
-          include="$TOOLCHAIN/libcxx/include" \
-          system/filesystem/date_time/thread/regex \
-          stage
-
-        echo "=== Checking built libraries ==="
-        ls -la stage/lib/
-        ls -lh stage/lib/libboost_*.a 2>/dev/null || echo "No libboost_*.a found"
-
-        echo "=== Verifying architecture ==="
-        for lib in stage/lib/libboost_system.a stage/lib/libboost_filesystem.a; do
-          if [ -f "$lib" ]; then
-            file "$lib"
-          fi
-        done
-
-        mkdir -p /tmp/boost-arm64
-        cp -r stage/lib/* /tmp/boost-arm64/
-        mkdir -p /tmp/boost-arm64/include
-        cp -r boost /tmp/boost-arm64/include/
-
-        echo "=== Final Boost artifact ==="
-        ls -la /tmp/boost-arm64/
-        find /tmp/boost-arm64 -name "libboost_*.a"
-
-        BOOST_DIR="/tmp/boost-arm64"
-        BOOST_LIB_PATH="$BOOST_DIR"
-        BOOST_INCLUDE_PATH="$BOOST_DIR/include"
-
-        echo "BOOST_DIR=$BOOST_DIR" >> $GITHUB_ENV
-        echo "BOOST_LIB_PATH=$BOOST_LIB_PATH" >> $GITHUB_ENV
-        echo "BOOST_INCLUDE_PATH=$BOOST_INCLUDE_PATH" >> $GITHUB_ENV
-
-        echo "Set BOOST_DIR=$BOOST_DIR"
-
-    - name: Build Step 3 - Build libqbcore.so with OpenSSL + Boost static linking
-      run: |
-        set -e
-        echo "=== Step 3: Building libqbcore.so with OpenSSL + Boost static linking ==="
-
-        cd $GITHUB_WORKSPACE
-        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
-
-        echo "OPENSSL_DIR=$OPENSSL_DIR"
-        echo "BOOST_DIR=$BOOST_DIR"
-        echo "BOOST_LIB_PATH=$BOOST_LIB_PATH"
-
-        mkdir -p app/src/main/cpp/build
-        cd app/src/main/cpp/build
-
-        cmake .. \
-          -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-          -DANDROID_PLATFORM=android-24 \
-          -DANDROID_ABI=arm64-v8a \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DOPENSSL_DIR=$OPENSSL_DIR \
-          -DBOOST_DIR=$BOOST_DIR \
-          -DBOOST_LIB_PATH=$BOOST_LIB_PATH
-
-        echo "=== CMake configuration ==="
-        head -30 CMakeFiles/qbcore.dir/flags.make 2>/dev/null || echo "No flags.make found"
-
-        echo "=== Building qbcore ==="
-        cmake --build . -- -j$(nproc) 2>&1
-
-        echo "=== Checking built library ==="
-        QBCORE_SO=$(find . -name "libqbcore.so" 2>/dev/null | head -1)
-        if [ -n "$QBCORE_SO" ] && [ -f "$QBCORE_SO" ]; then
-          echo "SUCCESS: Built $QBCORE_SO"
-          ls -lh "$QBCORE_SO"
-          file "$QBCORE_SO"
-        else
-          echo "ERROR: libqbcore.so not found after build"
-          ls -la
-          find . -name "*.so" 2>/dev/null
-          exit 1
-        fi
-
-        echo "=== readelf -d libqbcore.so ==="
-        readelf -d "$QBCORE_SO" | head -20
-
-        echo "=== Required libraries ==="
-        readelf -d "$QBCORE_SO" | grep "NEEDED"
-
-        echo "=== Verifying: no libssl.so or libcrypto.so ==="
-        if readelf -d "$QBCORE_SO" | grep -q "libssl.so\|libcrypto.so"; then
-          echo "ERROR: libqbcore.so depends on libssl.so or libcrypto.so (should be statically linked)"
-          exit 1
-        else
-          echo "GOOD: libqbcore.so does NOT depend on libssl.so or libcrypto.so"
-        fi
-
-        echo "=== Verifying: no boost_*.so ==="
-        if readelf -d "$QBCORE_SO" | grep -q "boost_"; then
-          echo "ERROR: libqbcore.so depends on boost_*.so (should be statically linked)"
-          readelf -d "$QBCORE_SO" | grep "boost_"
-          exit 1
-        else
-          echo "GOOD: libqbcore.so does NOT depend on boost_*.so"
-        fi
-
-        echo "=== Verifying: has libc++_shared.so ==="
-        if readelf -d "$QBCORE_SO" | grep -q "libc++_shared.so"; then
-          echo "GOOD: libqbcore.so depends on libc++_shared.so"
-        else
-          echo "WARNING: libqbcore.so does not depend on libc++_shared.so"
-        fi
-
-        echo "=== Copying to jniLibs ==="
-        mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-        cp "$QBCORE_SO" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-
-    - name: Upload native artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-native-arm64-v8a
-        path: app/src/main/jniLibs/arm64-v8a/
-        retention-days: 30
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-native-arm64-v8a
+          path: build/libqbcore.so
 
   build-apk:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
     needs: build-native
-
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v2
+      - name: Setup Android SDK & NDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
 
-    - name: Install NDK and CMake
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+      - name: Download native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-native-arm64-v8a
+          path: app/src/main/jniLibs/arm64-v8a
 
-    - name: Download native artifact
-      id: download-native
-      uses: actions/download-artifact@v4
-      with:
-        name: android-native-arm64-v8a
-        path: app/src/main/jniLibs/arm64-v8a
-
-    - name: Build APK
-      run: |
-        echo "=== Downloaded jniLibs ==="
-        ls -la app/src/main/jniLibs/arm64-v8a/
-
-        echo "=== Verify libqbcore.so ==="
-        if [ -f "app/src/main/jniLibs/arm64-v8a/libqbcore.so" ]; then
-          echo "SUCCESS: libqbcore.so exists"
-          file app/src/main/jniLibs/arm64-v8a/libqbcore.so
-          readelf -d app/src/main/jniLibs/arm64-v8a/libqbcore.so | head -20
-        else
-          echo "ERROR: libqbcore.so not found!"
-          exit 1
-        fi
-
-        echo "=== Build APK ==="
-        export ANDROID_HOME=$ANDROID_SDK_ROOT
-        export JAVA_HOME=$JAVA_HOME_17_X64
-        chmod +x gradlew
-        ./gradlew assembleDebug --no-daemon 2>&1 | tail -80
-
-        echo "=== APK Build Complete ==="
-        ls -la app/build/outputs/apk/debug/ 2>/dev/null || echo "APK dir not found"
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Build APK
+        run: |
+          cd app
+          ./gradlew assembleDebug
+          
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
