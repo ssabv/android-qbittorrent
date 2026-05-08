@@ -26,32 +26,33 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v2
       
-    - name: Download precompiled libraries
+    - name: Install NDK and CMake
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+        
+    - name: Download precompiled libraries from frostwire jlibtorrent
       run: |
         # Create jniLibs directory
         mkdir -p app/src/main/jniLibs/arm64-v8a
         
-        # Download libtorrent for Android (prebuilt)
-        # Using a known working prebuilt libtorrent 2.0.9 for Android
-        LIBTORRENT_URL="https://github.com/nickcoutsos/android-libtorrent/releases/download/v2.0.9-rc1/libtorrent-2.0.9-arm64-v8a.so"
-        curl -L -o app/src/main/jniLibs/arm64-v8a/libtorrent.so "$LIBTORRENT_URL" || \
-        wget -q -O app/src/main/jniLibs/arm64-v8a/libtorrent.so "$LIBTORRENT_URL"
+        # Download frostwire jlibtorrent Android arm64 release
+        JAR_URL="https://github.com/frostwire/frostwire-jlibtorrent/releases/download/release/2.0.12.7/jlibtorrent-android-arm64-2.0.12.7.jar"
         
-        # Download OpenSSL for Android
-        OPENSSL_URL="https://github.com/nickcoutsos/android-libtorrent/releases/download/v2.0.9-rc1/openssl-3.2.1-arm64-v8a.so"
-        curl -L -o app/src/main/jniLibs/arm64-v8a/libssl.so "$OPENSSL_URL" || \
-        wget -q -O app/src/main/jniLibs/arm64-v8a/libssl.so "$OPENSSL_URL"
+        # Download the JAR
+        wget -q -O /tmp/jlibtorrent-android-arm64.jar "$JAR_URL"
         
-        curl -L -o app/src/main/jniLibs/arm64-v8a/libcrypto.so "$OPENSSL_URL" || \
-        wget -q -O app/src/main/jniLibs/arm64-v8a/libcrypto.so "$OPENSSL_URL"
+        # Extract .so files from JAR
+        cd /tmp
+        unzip -o jlibtorrent-android-arm64.jar "lib/*.so" -d extracted/
         
-        # Download Boost for Android
-        BOOST_URL="https://github.com/nickcoutsos/android-libtorrent/releases/download/v2.0.9-rc1/boost-1.84-arm64-v8a.tar.gz"
-        curl -L -o /tmp/boost.tar.gz "$BOOST_URL" || wget -q -O /tmp/boost.tar.gz "$BOOST_URL"
-        tar -xzf /tmp/boost.tar.gz -C app/src/main/jniLibs/arm64-v8a/
+        # List extracted files
+        ls -la extracted/lib/
         
-        # List downloaded files
-        ls -la app/src/main/jniLibs/arm64-v8a/
+        # Copy to project jniLibs
+        cp extracted/lib/*.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        
+        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
         
     - name: Build APK
       run: |
@@ -65,10 +66,3 @@ jobs:
       with:
         name: app-debug
         path: app/build/outputs/apk/debug/app-debug.apk
-        
-    - name: Upload debug symbols
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug-symbols
-        path: app/build/outputs/mapping/**/mapping.txt
