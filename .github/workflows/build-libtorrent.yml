@@ -1,6 +1,11 @@
 name: Build libtorrent Dependencies
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-libtorrent.yml'
   workflow_dispatch:
     inputs:
       libtorrent_version:
