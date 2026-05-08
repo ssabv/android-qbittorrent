@@ -47,12 +47,13 @@ jobs:
           ls -la openssl-arm64/lib/
 
       # -----------------------
-      # Stage 3: Build native library
+      # Stage 3: Build native library (verbose output)
       # -----------------------
       - name: Build libqbcore.so
         run: |
           echo "=== Building libqbcore.so ==="
           cd $GITHUB_WORKSPACE/app/src/main/cpp
+          rm -rf build
           mkdir -p build
           cd build
           
@@ -61,32 +62,36 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
             -DANDROID_STL=c++_shared \
-            -DOPENSSL_DIR=/tmp/openssl-arm64
+            -DOPENSSL_DIR=/tmp/openssl-arm64 2>&1 | tail -50
           
-          cmake --build . --target qbcore
+          cmake --build . --target qbcore -- -j4 2>&1 | tail -50
           
-          echo "=== libqbcore.so built ==="
-          ls -lh libqbcore.so
+          ls -lh libqbcore.so 2>/dev/null && echo "Build SUCCESS" || echo "Build FAILED"
 
       # -----------------------
       # Stage 3: Copy to jniLibs
       # -----------------------
       - name: Copy to jniLibs
         run: |
-          mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-          cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so \
-             $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          if [ -f "$GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so" ]; then
+            mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+            cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so \
+               $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+            ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          else
+            echo "ERROR: libqbcore.so not found"
+            ls -la $GITHUB_WORKSPACE/app/src/main/cpp/build/
+            exit 1
+          fi
 
       # -----------------------
       # Stage 4: Build APK
       # -----------------------
       - name: Build APK
         run: |
-          echo "=== Building APK ==="
           cd $GITHUB_WORKSPACE/app
           ls -la ../src/main/jniLibs/arm64-v8a/
-          ./gradlew assembleDebug --no-daemon 2>&1 | tail -30
+          ./gradlew assembleDebug --no-daemon 2>&1 | tail -50
 
       # -----------------------
       # Stage 4: Upload APK artifact
