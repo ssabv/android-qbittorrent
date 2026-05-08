@@ -5,6 +5,8 @@ extern "C"
 {
 #endif
 
+#include <stddef.h>
+
 #define cJSON_IsReference 1
 #define cJSON_StringIsConst 2
 
@@ -93,6 +95,8 @@ void cJSON_AddRawToObject(cJSON *object, const char *name, const char *raw);
 void cJSON_AddBoolToObject(cJSON *object, const char *name, int boolean);
 void cJSON_AddNullToObject(cJSON *object, const char *name);
 
+typedef int cJSON_Bool;
+
 cJSON *cJSON_DetachItemFromArray(cJSON *array, int which);
 void cJSON_DeleteItemFromArray(cJSON *array, int which);
 cJSON *cJSON_DetachItemFromObject(cJSON *object, const char *string);
@@ -118,10 +122,6 @@ cJSON *cJSON_ParseWithLengthOpts(const char *value, size_t buffer_length, const 
 #define cJSON_IsTrue(x) (((x) != NULL) && (((x)->type & 0xFF) == cJSON_True))
 #define cJSON_IsFalse(x) (((x) != NULL) && (((x)->type & 0xFF) == cJSON_False))
 #define cJSON_IsBool(x) (((x) != NULL) && ((((x)->type & 0xFF) == cJSON_True) || (((x)->type & 0xFF) == cJSON_False)))
-
-typedef int cJSON_Bool;
-#define cJSON_True 1
-#define cJSON_False 0
 
 #ifdef __cplusplus
 }
