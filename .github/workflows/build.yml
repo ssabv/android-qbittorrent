@@ -52,25 +52,9 @@ jobs:
           exit 1
         fi
         echo "Using NDK: $NDK_PATH"
-        echo "NDK contents:"
-        ls -la $NDK_PATH/
-        
-        PREBUILT=$(find $NDK_PATH/toolchains -name "clang++" -type f 2>/dev/null | head -1)
-        if [ -n "$PREBUILT" ]; then
-          echo "Found clang++: $PREBUILT"
-          $PREBUILT --version 2>&1 | head -5
-        else
-          echo "WARNING: clang++ not found in toolchains, checking bin dir"
-          ls $NDK_PATH/toolchains/ 2>/dev/null
-          find $NDK_PATH -name "clang*" -type f 2>/dev/null | head -10
-        fi
-        
-        if command -v cmake &> /dev/null; then
-          cmake --version | head -3
-        else
-          echo "ERROR: cmake not found"
-          exit 1
-        fi
+        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+        echo "Toolchain: $TOOLCHAIN"
+        ls $TOOLCHAIN/bin/aarch64-linux-android*-clang 2>/dev/null | head -5
 
     - name: Build Step 1 - Hello JNI
       run: |
@@ -79,43 +63,98 @@ jobs:
         mkdir -p /tmp/hello-jni
         printf '#include <stdio.h>\nint sayHello() { printf("Hello from JNI!\\n"); return 42; }\n' > /tmp/hello-jni/hello.c
         printf 'cmake_minimum_required(VERSION 3.22.1)\nproject(hello-jni)\nadd_library(hello-jni SHARED hello.c)\n' > /tmp/hello-jni/CMakeLists.txt
-        cat /tmp/hello-jni/hello.c
-        cat /tmp/hello-jni/CMakeLists.txt
         mkdir -p /tmp/hello-jni/build
         cd /tmp/hello-jni/build
-        
-        NDK_VERSION="27.0.12077973"
-        NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-        echo "NDK Path: $NDK_PATH"
-        echo "Toolchain: $TOOLCHAIN"
-        ls -la $TOOLCHAIN/bin/ | head -20
-        
+        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
         cmake .. \
           -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
           -DANDROID_PLATFORM=android-24 \
           -DANDROID_ABI=arm64-v8a \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_VERBOSE_MAKEFILE=ON \
-          -DANDROID_NDK=$NDK_PATH
+          -DCMAKE_BUILD_TYPE=Release
         cmake --build . -- -j$(nproc) 2>&1
         SO_FILE=$(find . -name "*.so" 2>/dev/null | head -1)
         echo "Found SO: $SO_FILE"
-        ls -la
+
+    - name: Build Step 2 - OpenSSL
+      run: |
+        set -e
+        echo "=== Step 2: Building OpenSSL for Android arm64-v8a ==="
+        
+        NDK_VERSION="27.0.12077973"
+        NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
+        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+        
+        export ANDROID_NDK=$NDK_PATH
+        export PATH="$TOOLCHAIN/bin:$PATH"
+        
+        export CC="aarch64-linux-android24-clang"
+        export CXX="aarch64-linux-android24-clang++"
+        export AR="$TOOLCHAIN/bin/aarch64-linux-android-ar"
+        export RANLIB="$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+        export STRIP="$TOOLCHAIN/bin/aarch64-linux-android-strip"
+        
+        echo "CC: $CC"
+        echo "NDK Path: $NDK_PATH"
+        $CC --version | head -3
+        
+        mkdir -p /tmp/openssl-build
+        cd /tmp/openssl-build
+        
+        if [ ! -f "/tmp/openssl-3.4.0.tar.gz" ]; then
+          echo "Downloading OpenSSL 3.4.0..."
+          curl -fsSL https://www.openssl.org/source/openssl-3.4.0.tar.gz -o /tmp/openssl-3.4.0.tar.gz
+        fi
+        
+        echo "Extracting OpenSSL..."
+        tar -xzf /tmp/openssl-3.4.0.tar.gz -C /tmp/openssl-build --strip-components=1
+        
+        echo "=== Configuring OpenSSL ==="
+        ./Configure \
+          android64-aarch64 \
+          --prefix=/tmp/openssl-install \
+          --openssldir=/tmp/openssl-install/ssl \
+          -DANDROID_COMPILER_FLAGS="-target aarch64 -mandroid -fPIE" \
+          CFLAGS="-target aarch64 -mandroid -fPIC -O3" \
+          LDFLAGS="-target aarch64 -mandroid -fPIE" \
+          2>&1 | tail -30
+        
+        echo "=== Building OpenSSL ==="
+        make -j$(nproc) 2>&1 | tail -30
+        
+        echo "=== Installing OpenSSL ==="
+        make install_sw 2>&1 | tail -20
+        
+        echo "=== Verifying built libraries ==="
+        ls -la /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so 2>/dev/null || echo "Libs not found"
+        /tmp/openssl-install/bin/openssl version
+        
+        file /tmp/openssl-install/lib/libssl.so
+        file /tmp/openssl-install/lib/libcrypto.so
+        
+        echo "=== Library sizes ==="
+        ls -lh /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so
 
     - name: Copy to jniLibs
       run: |
         mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+        
+        cp /tmp/openssl-install/lib/libssl.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        cp /tmp/openssl-install/lib/libcrypto.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        
         SO_FILE=$(find /tmp/hello-jni/build -name "*.so" 2>/dev/null | head -1)
         if [ -n "$SO_FILE" ] && [ -f "$SO_FILE" ]; then
           cp "$SO_FILE" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
-          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-          echo "SUCCESS: Copied libhello-jni.so"
-        else
-          echo "ERROR: No .so file found to copy"
-          ls -la /tmp/hello-jni/build/ 2>/dev/null || echo "build dir not found"
-          exit 1
         fi
+        
+        echo "=== jniLibs/arm64-v8a contents ==="
+        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        
+        echo "=== Verify OpenSSL libs ==="
+        file $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libssl.so
+        file $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libcrypto.so
+        
+        echo "=== readelf -d libssl.so ==="
+        readelf -d $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libssl.so | head -15
 
     - name: Upload native artifact
       uses: actions/upload-artifact@v4
@@ -160,11 +199,26 @@ jobs:
       run: |
         echo "=== Downloaded jniLibs ==="
         ls -la app/src/main/jniLibs/arm64-v8a/
-        if [ ! -f "app/src/main/jniLibs/arm64-v8a/libhello-jni.so" ]; then
-          echo "ERROR: libhello-jni.so not found!"
+        
+        echo "=== Verify libssl.so ==="
+        if [ -f "app/src/main/jniLibs/arm64-v8a/libssl.so" ]; then
+          echo "SUCCESS: libssl.so exists"
+          file app/src/main/jniLibs/arm64-v8a/libssl.so
+          readelf -d app/src/main/jniLibs/arm64-v8a/libssl.so | head -10
+        else
+          echo "ERROR: libssl.so not found!"
           exit 1
         fi
-        echo "Native library ready"
+        
+        echo "=== Verify libcrypto.so ==="
+        if [ -f "app/src/main/jniLibs/arm64-v8a/libcrypto.so" ]; then
+          echo "SUCCESS: libcrypto.so exists"
+          file app/src/main/jniLibs/arm64-v8a/libcrypto.so
+          readelf -d app/src/main/jniLibs/arm64-v8a/libcrypto.so | head -10
+        else
+          echo "ERROR: libcrypto.so not found!"
+          exit 1
+        fi
 
     - name: Build APK
       run: |
