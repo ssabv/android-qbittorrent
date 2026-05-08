@@ -83,7 +83,25 @@ jobs:
         NDK_VERSION="27.0.12077973"
         NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
         TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-        SYSROOT="$TOOLCHAIN/sysroot"
+        
+        export ANDROID_NDK=$NDK_PATH
+        export CROSS_COMPILE="aarch64-linux-android24-"
+        export CC="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
+        export CXX="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
+        export AR="$TOOLCHAIN/bin/aarch64-linux-android-ar"
+        export RANLIB="$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+        export STRIP="$TOOLCHAIN/bin/aarch64-linux-android-strip"
+        export ANDROID_DEV="$TOOLCHAIN/sysroot/usr"
+        export SYSROOT="$TOOLCHAIN/sysroot"
+        
+        export CFLAGS="--target=aarch64-linux-android24 -mandroid -fPIC -O3"
+        export LDFLAGS="--target=aarch64-linux-android24 -mandroid"
+        export CPPFLAGS="--target=aarch64-linux-android24 -mandroid"
+        
+        echo "NDK Path: $NDK_PATH"
+        echo "CC: $CC"
+        echo "CROSS_COMPILE: $CROSS_COMPILE"
+        $CC --version | head -2
         
         mkdir -p /tmp/openssl-build
         cd /tmp/openssl-build
@@ -96,29 +114,22 @@ jobs:
         echo "Extracting OpenSSL..."
         tar -xzf /tmp/openssl-3.4.0.tar.gz -C /tmp/openssl-build --strip-components=1
         
-        cat > /tmp/aarch64-linux-android-gcc << 'EOF'
-#!/bin/bash
-exec clang -target aarch64-linux-android24 "$@"
-EOF
-        chmod +x /tmp/aarch64-linux-android-gcc
-        
-        export PATH="/tmp:$PATH"
-        export ANDROID_NDK=$NDK_PATH
-        export CROSS_COMPILE="aarch64-linux-android24-"
-        export ANDROID_DEV="$SYSROOT/usr"
-        
-        echo "PATH: $PATH"
-        echo "CROSS_COMPILE: $CROSS_COMPILE"
-        echo "which gcc: $(which aarch64-linux-android-gcc 2>/dev/null || echo 'not found')"
-        
         echo "=== Configuring OpenSSL ==="
         perl ./Configure android64-aarch64 \
           --prefix=/tmp/openssl-install \
           --openssldir=/tmp/openssl-install/ssl \
-          2>&1 | tail -30
+          CC="$CC" \
+          AR="$AR" \
+          RANLIB="$RANLIB" \
+          2>&1 | tail -40
+        
+        echo "=== Checking generated Makefile ==="
+        head -5 Makefile 2>/dev/null || echo "No Makefile found"
+        grep "^CC" Makefile 2>/dev/null | head -5
+        grep "^CROSS_COMPILE" Makefile 2>/dev/null | head -5
         
         echo "=== Building OpenSSL ==="
-        make -j$(nproc) 2>&1 | tail -30
+        make -j$(nproc) 2>&1 | tail -40
         
         echo "=== Installing OpenSSL ==="
         make install_sw 2>&1 | tail -20
