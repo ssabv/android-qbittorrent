@@ -121,23 +121,41 @@ jobs:
         NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
 
         echo "=== Downloading Boost $BOOST_VERSION ==="
-        curl -L "https://boostorg.jfrog.io/artifactory/source/boost_${BOOST_VERSION}.tar.gz" -o boost.tar.gz
+        curl -L "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION}.tar.gz" -o boost.tar.gz
 
-        echo "=== Extracting ==="
-        rm -rf boost-$BOOST_VERSION
-        tar -xzf boost.tar.gz
+        FILE_TYPE=$(file boost.tar.gz)
+        echo "=== Downloaded file type: $FILE_TYPE ==="
+
+        rm -rf boost-$BOOST_VERSION boost-extract
+
+        if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" =~ "POSIX tar archive" ]]; then
+          echo "=== Extracting TAR.GZ ==="
+          tar -xzf boost.tar.gz
+        elif [[ "$FILE_TYPE" == *"Zip"* ]]; then
+          echo "=== Extracting ZIP ==="
+          unzip -q boost.tar.gz -d boost-extract
+        else
+          echo "ERROR: Unknown archive format: $FILE_TYPE"
+          head -c 100 boost.tar.gz | xxd | head -5
+          exit 1
+        fi
+
         cd boost-$BOOST_VERSION
+        echo "=== Boost source directory ==="
+        ls -la
 
         echo "=== Bootstrap ==="
+        chmod +x bootstrap.sh
         ./bootstrap.sh --with-toolchain=clang
 
         TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
         CLANG_CXX="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
-        CLANG_C="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
+        CLANG_AR="$TOOLCHAIN/bin/aarch64-linux-android24-ar"
 
-        echo "=== Building Boost with b2 ==="
+        echo "=== Generating Boost headers ==="
         ./b2 headers
 
+        echo "=== Building Boost libraries ==="
         ./b2 -j$(nproc) \
           toolchain=clang \
           target-os=android \
@@ -151,36 +169,37 @@ jobs:
           --without-test \
           --without-log \
           --without-locale \
+          --without-graph \
+          --without_graph \
           cxxstd=17 \
-          define=BOOST_EXCEPTION_DISABLE \
+          stagedir=stage \
           include="$TOOLCHAIN/sysroot/usr/include/aarch64-linux-android" \
           include="$TOOLCHAIN/libcxx/include/aarch64-linux-android" \
           include="$TOOLCHAIN/libcxx/include" \
-          -sBOOST_HEADER_ONLY=0 \
-          system/filesystem/date_time/thread/regex variant=release link=static runtime-link=shared \
+          system/filesystem/date_time/thread/regex \
           stage
 
         echo "=== Checking built libraries ==="
         ls -la stage/lib/
-        ls -lh stage/lib/libboost_*.a
+        ls -lh stage/lib/libboost_*.a 2>/dev/null || echo "No libboost_*.a found"
 
         echo "=== Verifying architecture ==="
-        for lib in stage/lib/libboost_*.a; do
+        for lib in stage/lib/libboost_system.a stage/lib/libboost_filesystem.a; do
           if [ -f "$lib" ]; then
-            file "$lib" | head -1
+            file "$lib"
           fi
         done
 
-        mkdir -p boost-arm64
-        cp -r stage/lib/* boost-arm64/
-        mkdir -p boost-arm64/include
-        cp -r boost boost-arm64/include/
+        mkdir -p /tmp/boost-arm64
+        cp -r stage/lib/* /tmp/boost-arm64/
+        mkdir -p /tmp/boost-arm64/include
+        cp -r boost /tmp/boost-arm64/include/
 
-        echo "=== BOOST artifact ==="
-        ls -la boost-arm64/
-        ls -la boost-arm64/include/boost/ 2>/dev/null | head -10
+        echo "=== Final Boost artifact ==="
+        ls -la /tmp/boost-arm64/
+        find /tmp/boost-arm64 -name "libboost_*.a"
 
-        BOOST_DIR="$PWD/boost-arm64"
+        BOOST_DIR="/tmp/boost-arm64"
         BOOST_LIB_PATH="$BOOST_DIR"
         BOOST_INCLUDE_PATH="$BOOST_DIR/include"
 
@@ -189,8 +208,6 @@ jobs:
         echo "BOOST_INCLUDE_PATH=$BOOST_INCLUDE_PATH" >> $GITHUB_ENV
 
         echo "Set BOOST_DIR=$BOOST_DIR"
-        echo "Set BOOST_LIB_PATH=$BOOST_LIB_PATH"
-        echo "Set BOOST_INCLUDE_PATH=$BOOST_INCLUDE_PATH"
 
     - name: Build Step 3 - Build libqbcore.so with OpenSSL + Boost static linking
       run: |
