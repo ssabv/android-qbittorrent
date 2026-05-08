@@ -83,23 +83,7 @@ jobs:
         NDK_VERSION="27.0.12077973"
         NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
         TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-        
-        export ANDROID_NDK=$NDK_PATH
-        export PATH="$TOOLCHAIN/bin:$PATH"
-        
-        export CC="aarch64-linux-android24-clang"
-        export CXX="aarch64-linux-android24-clang++"
-        export AR="$TOOLCHAIN/bin/aarch64-linux-android-ar"
-        export RANLIB="$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
-        export STRIP="$TOOLCHAIN/bin/aarch64-linux-android-strip"
-        
-        export CFLAGS="-target aarch64 -mandroid -fPIC -O3"
-        export LDFLAGS="-target aarch64 -mandroid"
-        
-        echo "CC: $CC"
-        echo "CFLAGS: $CFLAGS"
-        echo "NDK Path: $NDK_PATH"
-        $CC --version | head -3
+        SYSROOT="$TOOLCHAIN/sysroot"
         
         mkdir -p /tmp/openssl-build
         cd /tmp/openssl-build
@@ -112,9 +96,23 @@ jobs:
         echo "Extracting OpenSSL..."
         tar -xzf /tmp/openssl-3.4.0.tar.gz -C /tmp/openssl-build --strip-components=1
         
+        cat > /tmp/aarch64-linux-android-gcc << 'EOF'
+#!/bin/bash
+exec clang -target aarch64-linux-android24 "$@"
+EOF
+        chmod +x /tmp/aarch64-linux-android-gcc
+        
+        export PATH="/tmp:$PATH"
+        export ANDROID_NDK=$NDK_PATH
+        export CROSS_COMPILE="aarch64-linux-android24-"
+        export ANDROID_DEV="$SYSROOT/usr"
+        
+        echo "PATH: $PATH"
+        echo "CROSS_COMPILE: $CROSS_COMPILE"
+        echo "which gcc: $(which aarch64-linux-android-gcc 2>/dev/null || echo 'not found')"
+        
         echo "=== Configuring OpenSSL ==="
-        ./Configure \
-          android64-aarch64 \
+        perl ./Configure android64-aarch64 \
           --prefix=/tmp/openssl-install \
           --openssldir=/tmp/openssl-install/ssl \
           2>&1 | tail -30
@@ -127,14 +125,11 @@ jobs:
         
         echo "=== Verifying built libraries ==="
         ls -la /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so 2>/dev/null || echo "Libs not found"
-        /tmp/openssl-install/bin/openssl version || echo "openssl binary not found"
+        file /tmp/openssl-install/lib/libssl.so 2>/dev/null || echo "libssl.so not found"
+        file /tmp/openssl-install/lib/libcrypto.so 2>/dev/null || echo "libcrypto.so not found"
         
         echo "=== Library sizes ==="
         ls -lh /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so 2>/dev/null
-        
-        echo "=== File info ==="
-        file /tmp/openssl-install/lib/libssl.so 2>/dev/null || echo "libssl.so not found"
-        file /tmp/openssl-install/lib/libcrypto.so 2>/dev/null || echo "libcrypto.so not found"
 
     - name: Copy to jniLibs
       run: |
