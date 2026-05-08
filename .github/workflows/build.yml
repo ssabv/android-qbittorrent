@@ -83,38 +83,56 @@ jobs:
         mkdir -p /tmp/openssl-install/lib
         cd /tmp/openssl-install
         
-        echo "=== Downloading OpenSSL 3.4.0 prebuilt for arm64-v8a ==="
-        curl -fsSL "https://github.com/217heidai/openssl_for_android/releases/download/3.4.0/OpenSSL_3.4.0_arm64-v8a.tar.gz" -o openssl.tar.gz
+        echo "=== Downloading OpenSSL 3.4.1 prebuilt for arm64-v8a ==="
+        curl -fsSL "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz" -o openssl.tar.gz 2>/dev/null || \
+        curl -fsSL "https://github.com/TaurusTLS-Developers/OpenSSL-Distribution/releases/download/v4.0.0/openssl-4.0.0-Android-arm64.zip" -o openssl.zip
         
         echo "=== Extracting ==="
-        tar -xzf openssl.tar.gz
-        
-        echo "=== Checking extracted contents ==="
-        ls -la
-        ls -la openssl_3.4.0_arm64-v8a/ 2>/dev/null && ls -la openssl_3.4.0_arm64-v8a/lib/ 2>/dev/null
-        
-        if [ -d "openssl_3.4.0_arm64-v8a/lib" ]; then
-          cp openssl_3.4.0_arm64-v8a/lib/libssl.so /tmp/openssl-install/lib/ 2>/dev/null || echo "no libssl in lib/"
-          cp openssl_3.4.0_arm64-v8a/lib/libcrypto.so /tmp/openssl-install/lib/ 2>/dev/null || echo "no libcrypto in lib/"
-        elif [ -f "openssl_3.4.0_arm64-v8a/libssl.so" ]; then
-          cp openssl_3.4.0_arm64-v8a/libssl.so /tmp/openssl-install/lib/
-          cp openssl_3.4.0_arm64-v8a/libcrypto.so /tmp/openssl-install/lib/
+        if [ -f "openssl.zip" ]; then
+          unzip -o openssl.zip
+          find . -name "*.so" -exec cp {} /tmp/openssl-install/lib/ \; 2>/dev/null
+          find . -name "include" -type d -exec cp -r {} /tmp/openssl-install/ \; 2>/dev/null
         else
-          find . -name "*.so" | head -20
+          tar -xzf openssl.tar.gz
+          if [ -d "openssl_3.4.1_arm64-v8a/lib" ]; then
+            cp openssl_3.4.1_arm64-v8a/lib/* /tmp/openssl-install/lib/ 2>/dev/null || true
+          fi
         fi
+        
+        echo "=== Checking for .so files ==="
+        find . -name "*.so" 2>/dev/null | head -10
         
         echo "=== Verifying libraries ==="
         ls -la /tmp/openssl-install/lib/
-        file /tmp/openssl-install/lib/libssl.so 2>/dev/null || echo "libssl.so missing"
-        file /tmp/openssl-install/lib/libcrypto.so 2>/dev/null || echo "libcrypto.so missing"
-        ls -lh /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so 2>/dev/null
+        for f in /tmp/openssl-install/lib/libssl.so /tmp/openssl-install/lib/libcrypto.so; do
+          if [ -f "$f" ]; then
+            echo "FOUND: $f"
+            file "$f"
+          else
+            echo "MISSING: $f"
+          fi
+        done
 
     - name: Copy to jniLibs
       run: |
         mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
         
-        cp /tmp/openssl-install/lib/libssl.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-        cp /tmp/openssl-install/lib/libcrypto.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        SO_SSL=$(find /tmp/openssl-install -name "libssl.so" 2>/dev/null | head -1)
+        SO_CRYPTO=$(find /tmp/openssl-install -name "libcrypto.so" 2>/dev/null | head -1)
+        
+        if [ -n "$SO_SSL" ] && [ -f "$SO_SSL" ]; then
+          cp "$SO_SSL" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          echo "Copied libssl.so from $SO_SSL"
+        else
+          echo "No libssl.so found to copy"
+        fi
+        
+        if [ -n "$SO_CRYPTO" ] && [ -f "$SO_CRYPTO" ]; then
+          cp "$SO_CRYPTO" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          echo "Copied libcrypto.so from $SO_CRYPTO"
+        else
+          echo "No libcrypto.so found to copy"
+        fi
         
         SO_FILE=$(find /tmp/hello-jni/build -name "*.so" 2>/dev/null | head -1)
         if [ -n "$SO_FILE" ] && [ -f "$SO_FILE" ]; then
@@ -125,11 +143,15 @@ jobs:
         ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
         
         echo "=== Verify OpenSSL libs ==="
-        file $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libssl.so
-        file $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libcrypto.so
-        
-        echo "=== readelf -d libssl.so ==="
-        readelf -d $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libssl.so | head -15
+        for f in libssl.so libcrypto.so; do
+          if [ -f "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/$f" ]; then
+            echo "FOUND: $f"
+            file $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/$f
+            readelf -d $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/$f | head -5
+          else
+            echo "MISSING: $f"
+          fi
+        done
 
     - name: Upload native artifact
       uses: actions/upload-artifact@v4
@@ -175,25 +197,27 @@ jobs:
         echo "=== Downloaded jniLibs ==="
         ls -la app/src/main/jniLibs/arm64-v8a/
         
-        echo "=== Verify libssl.so ==="
-        if [ -f "app/src/main/jniLibs/arm64-v8a/libssl.so" ]; then
-          echo "SUCCESS: libssl.so exists"
-          file app/src/main/jniLibs/arm64-v8a/libssl.so
-          readelf -d app/src/main/jniLibs/arm64-v8a/libssl.so | head -10
+        echo "=== Verify libssl.a ==="
+        if [ -f "app/src/main/jniLibs/arm64-v8a/libssl.a" ]; then
+          echo "SUCCESS: libssl.a exists"
+          file app/src/main/jniLibs/arm64-v8a/libssl.a
         else
-          echo "ERROR: libssl.so not found!"
+          echo "ERROR: libssl.a not found!"
+          ls -la app/src/main/jniLibs/arm64-v8a/*.a 2>/dev/null || echo "No .a files"
           exit 1
         fi
         
-        echo "=== Verify libcrypto.so ==="
-        if [ -f "app/src/main/jniLibs/arm64-v8a/libcrypto.so" ]; then
-          echo "SUCCESS: libcrypto.so exists"
-          file app/src/main/jniLibs/arm64-v8a/libcrypto.so
-          readelf -d app/src/main/jniLibs/arm64-v8a/libcrypto.so | head -10
+        echo "=== Verify libcrypto.a ==="
+        if [ -f "app/src/main/jniLibs/arm64-v8a/libcrypto.a" ]; then
+          echo "SUCCESS: libcrypto.a exists"
+          file app/src/main/jniLibs/arm64-v8a/libcrypto.a
         else
-          echo "ERROR: libcrypto.so not found!"
+          echo "ERROR: libcrypto.a not found!"
           exit 1
         fi
+        
+        echo "=== OpenSSL include headers ==="
+        ls /tmp/openssl-install/lib/openssl_3.4.0_arm64-v8a/include/ 2>/dev/null || echo "No include dir in lib"
 
     - name: Build APK
       run: |
