@@ -38,22 +38,48 @@ jobs:
           BOOST_VERSION="1.87.0"
           BOOST_DIR=$PWD/boost
           BOOST_TAR="boost_${BOOST_VERSION}.tar.gz"
-          BOOST_URL="https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}"
 
-          echo "Downloading Boost $BOOST_VERSION from official source"
-          curl -L -o "$BOOST_TAR" "$BOOST_URL"
+          echo "=== Trying official Boost archives.boost.io ==="
+          BOOST_URL="https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}"
+          echo "URL: $BOOST_URL"
+          curl -L -o "$BOOST_TAR" "$BOOST_URL" -w "%{http_code}" || true
 
           FILE_TYPE=$(file "$BOOST_TAR")
           echo "Downloaded file type: $FILE_TYPE"
 
-          if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"tar"* ]]; then
-            mkdir -p "$BOOST_DIR"
-            tar -xzf "$BOOST_TAR" -C "$BOOST_DIR" --strip-components=1
-          else
-            echo "ERROR: Downloaded file is not a valid tar.gz: $FILE_TYPE"
-            head -c 200 "$BOOST_TAR" | xxd | head -5
+          if [[ "$FILE_TYPE" == *"HTML"* ]]; then
+            echo "ERROR: Got HTML page, trying alternative URL..."
+            rm -f "$BOOST_TAR"
+            
+            echo "=== Trying boostorg.jfrog.io ==="
+            BOOST_URL="https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION}/source/${BOOST_TAR}"
+            curl -L -o "$BOOST_TAR" "$BOOST_URL" -w "%{http_code}" || true
+            
+            FILE_TYPE=$(file "$BOOST_TAR")
+            echo "Downloaded file type: $FILE_TYPE"
+            
+            if [[ "$FILE_TYPE" == *"HTML"* ]]; then
+              echo "ERROR: Alternative URL also failed, trying GitHub mirror..."
+              rm -f "$BOOST_TAR"
+              
+              echo "=== Trying GitHub boostorg/boost release ==="
+              BOOST_URL="https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/${BOOST_TAR}"
+              curl -L -o "$BOOST_TAR" "$BOOST_URL" -w "%{http_code}" || true
+              
+              FILE_TYPE=$(file "$BOOST_TAR")
+              echo "Downloaded file type: $FILE_TYPE"
+            fi
+          fi
+
+          if [[ "$FILE_TYPE" == *"HTML"* ]]; then
+            echo "ERROR: All download attempts returned HTML"
+            cat "$BOOST_TAR" | head -20
             exit 1
           fi
+
+          echo "=== Extracting Boost source ==="
+          mkdir -p "$BOOST_DIR"
+          tar -xzf "$BOOST_TAR" -C "$BOOST_DIR" --strip-components=1
 
           ls -la "$BOOST_DIR/"
 
