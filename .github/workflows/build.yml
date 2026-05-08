@@ -35,7 +35,7 @@ jobs:
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
           echo "SDK/NDK setup complete"
-          ls -la $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -10
+          ls -la $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -5
 
       # -----------------------
       # Stage 2: OpenSSL static libs (prebuilt)
@@ -51,55 +51,53 @@ jobs:
           echo "OPENSSL_DIR=/tmp/openssl-arm64" >> $GITHUB_ENV
 
       # -----------------------
-      # Stage 3: Boost static libs (from source)
+      # Stage 3: Boost static libs (PREBUILT - dec1/Boost-for-Android)
       # -----------------------
-      - name: Download and Build Boost for Android arm64-v8a
+      - name: Download Boost prebuilt static libs
         run: |
-          set -e
-          echo "=== Downloading Boost ==="
+          echo "=== Downloading prebuilt Boost for Android arm64-v8a ==="
           cd /tmp
-          BOOST_VERSION="1.84.0"
-          curl -L -o boost.tar.gz "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION}.tar.gz" \
-            --connect-timeout 60 --max-time 900
+          curl -L -o boost-arm64.zip "https://github.com/dec1/Boost-for-Android/releases/download/ndk_27c_boost_1.87.0/ndk_27c_boost_1.87.0.zip"
           
-          FILE_TYPE=$(file boost.tar.gz)
+          FILE_TYPE=$(file boost-arm64.zip)
           echo "Downloaded: $FILE_TYPE"
           
-          if [[ "$FILE_TYPE" == *"HTML"* ]] || [[ ! "$FILE_TYPE" == *"gzip"* ]]; then
-            echo "Warning: Download may have failed, checking..."
-            head -c 200 boost.tar.gz
-            echo "Using alternative version..."
-            rm -f boost.tar.gz
-            curl -L -o boost.tar.gz "https://archives.boost.io/release/1.83.0/source/boost_1.83.0.tar.gz" \
-              --connect-timeout 60 --max-time 900
+          if [[ "$FILE_TYPE" == *"HTML"* ]]; then
+            echo "ERROR: Download returned HTML"
+            head -c 500 boost-arm64.zip
+            exit 1
           fi
-
+          
           echo "=== Extracting Boost ==="
-          rm -rf boost-$BOOST_VERSION
-          mkdir -p boost-$BOOST_VERSION
-          tar -xzf boost.tar.gz -C boost-$BOOST_VERSION --strip-components=1
-          ls -la boost-$BOOST_VERSION/
-
-          echo "=== Building Boost ==="
-          cd boost-$BOOST_VERSION
+          mkdir -p boost-arm64
+          unzip -q boost-arm64.zip -d boost-arm64
           
-          export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          export CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$ANDROID_API-clang
-          export CXX=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$ANDROID_API-clang++
+          echo "=== Checking Boost structure ==="
+          find boost-arm64 -name "*.a" | head -10
           
-          ./bootstrap.sh
+          # Find boost libraries
+          BOOST_LIB_DIR=$(find boost-arm64 -name "libboost_system.a" -exec dirname {} \; | head -1)
+          if [ -z "$BOOST_LIB_DIR" ]; then
+            echo "ERROR: Boost libs not found"
+            find boost-arm64 -type f -name "*.a" 2>/dev/null | head -5
+            exit 1
+          fi
           
-          ./b2 toolset=clang \
-            cxxflags="-fPIC -fexceptions -frtti" \
-            link=static threading=multi \
-            --with-system --with-filesystem --with-date_time --with-thread --with-regex \
-            target-os=android architecture=arm address-model=64 abi=aapcs \
-            stage
-
-          echo "=== Boost static libs ==="
-          ls -lh stage/lib/
+          echo "BOOST_LIB_DIR: $BOOST_LIB_DIR"
+          ls -la "$BOOST_LIB_DIR/"
           
-          echo "BOOST_DIR=/tmp/boost-$BOOST_VERSION" >> $GITHUB_ENV
+          # Verify libraries
+          for lib in system filesystem date_time thread regex; do
+            if [ -f "$BOOST_LIB_DIR/libboost_${lib}.a" ]; then
+              echo "Found: libboost_${lib}.a"
+              ls -lh "$BOOST_LIB_DIR/libboost_${lib}.a"
+            else
+              echo "WARNING: libboost_${lib}.a not found"
+            fi
+          done
+          
+          echo "BOOST_DIR=/tmp/boost-arm64" >> $GITHUB_ENV
+          echo "BOOST_LIB_DIR=$BOOST_LIB_DIR" >> $GITHUB_ENV
 
       # -----------------------
       # Stage 3: Build libqbcore.so
@@ -118,13 +116,17 @@ jobs:
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
             -DBOOST_ROOT=${{ env.BOOST_DIR }} \
+            -DBOOST_LIB_DIR=${{ env.BOOST_LIB_DIR }} \
             -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }}
           
           cmake --build . --target qbcore
           
-          echo "=== libqbcore.so ==="
+          echo "=== libqbcore.so built ==="
           ls -lh libqbcore.so
           file libqbcore.so
+          
+          echo "=== readelf check ==="
+          readelf -d libqbcore.so | grep NEEDED
 
       # -----------------------
       # Stage 3: Upload native artifact
@@ -175,6 +177,7 @@ jobs:
       - name: Build APK
         run: |
           cd $GITHUB_WORKSPACE/app
+          ls -la ../src/main/jniLibs/arm64-v8a/
           ./gradlew assembleDebug
 
       # -----------------------
