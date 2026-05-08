@@ -1,6 +1,11 @@
 name: Build libtorrent Dependencies
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-libtorrent.yml'
   workflow_dispatch:
     inputs:
       step:
@@ -39,61 +44,26 @@ jobs:
     - name: Verify NDK toolchain
       run: |
         echo "=== NDK Toolchain Verification ==="
-        
         NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
         echo "NDK Path: $NDK_PATH"
-        echo "NDK Contents:"
         ls -la $NDK_PATH/
-        
-        echo ""
         echo "=== Clang Compiler ==="
-        which aarch64-linux-android21-clang++
         aarch64-linux-android21-clang++ --version
         
-        echo ""
-        echo "=== CMake ==="
-        which cmake
-        cmake --version
-        
     - name: Build Step 1 - Hello JNI
-      if: github.event.inputs.step == '1' || github.event.inputs.step == ''
       run: |
         echo "=== Step 1: Building hello-jni.so ==="
         
         mkdir -p /tmp/hello-jni
         cd /tmp/hello-jni
         
-        # Create hello.c
-        cat > hello.c << 'EOF'
-#include <stdio.h>
-#include <stdlib.h>
-
-JNIEXPORT jint JNICALL Java_com_example_hello_HelloNative_sayHello(JNIEnv *env, jobject this) {
-    printf("Hello from JNI!\n");
-    return 42;
-}
-EOF
+        # Write hello.c using printf
+        printf '#include <stdio.h>\n#include <stdlib.h>\nint sayHello() { printf("Hello from JNI!\\n"); return 42; }' > hello.c
+        cat hello.c
         
         # Create CMakeLists.txt
-        cat > CMakeLists.txt << 'EOF'
-cmake_minimum_required(VERSION 3.22.1)
-project(hello-jni)
-
-add_library(hello-jni SHARED hello.c)
-target_compile_options(hello-jni PRIVATE -fPIC -fvisibility=hidden)
-EOF
+        printf 'cmake_minimum_required(VERSION 3.22.1)\nproject(hello-jni)\nadd_library(hello-jni SHARED hello.c)\ntarget_compile_options(hello-jni PRIVATE -fPIC)' > CMakeLists.txt
         
-        # Create Android.mk
-        cat > Android.mk << 'EOF'
-LOCAL_PATH := $(call my-dir)
-
-include $(CLEAR_VARS)
-LOCAL_MODULE    := hello-jni
-LOCAL_SRC_FILES := hello.c
-include $(BUILD_SHARED_LIBRARY)
-EOF
-        
-        # Build with CMake
         mkdir -p build
         cd build
         
@@ -108,15 +78,22 @@ EOF
         cmake --build . -- -j$(nproc)
         
         echo "=== Build Output ==="
-        ls -la
+        ls -la *.so 2>/dev/null || ls -la
         
         echo "=== Copy to jniLibs ==="
         mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-        cp libhello-jni.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
-        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        
+        # Find the .so file
+        SO_FILE=$(find . -name "*.so" | head -1)
+        if [ -n "$SO_FILE" ]; then
+          cp "$SO_FILE" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        else
+          echo "ERROR: No .so file found!"
+          exit 1
+        fi
 
-    - name: Upload Step 1 artifact
-      if: github.event.inputs.step == '1' || github.event.inputs.step == ''
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: android-libtorrent-arm64-v8a
