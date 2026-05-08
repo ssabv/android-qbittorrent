@@ -12,30 +12,60 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/../../../third_party)
-set(LIBTORRENT_DIR ${THIRD_PARTY_DIR}/libtorrent-install)
-set(BOOST_DIR ${THIRD_PARTY_DIR}/boost-install)
-set(OPENSSL_DIR ${THIRD_PARTY_DIR}/openssl-install)
+# Precompiled libraries directory
+set(PREBUILT_LIBS_DIR ${CMAKE_SOURCE_DIR}/../../../jniLibs/${ANDROID_ABI})
 
+# Find Android system libraries
+find_library(log-lib log)
+find_library(android-lib android)
+find_library(jni-lib jni)
+find_library(z-lib z)
+find_library(pthread-lib pthread)
+
+# Import precompiled libtorrent
+add_library(libtorrent SHARED IMPORTED)
+set_target_properties(libtorrent PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libtorrent.so
+)
+
+# Import precompiled OpenSSL
+add_library(ssl SHARED IMPORTED)
+set_target_properties(ssl PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libssl.so
+)
+
+add_library(crypto SHARED IMPORTED)
+set_target_properties(crypto PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libcrypto.so
+)
+
+# Import Boost libraries
+add_library(boost_system SHARED IMPORTED)
+set_target_properties(boost_system PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libboost_system.so
+)
+
+add_library(boost_filesystem SHARED IMPORTED)
+set_target_properties(boost_filesystem PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libboost_filesystem.so
+)
+
+add_library(boost_date_time SHARED IMPORTED)
+set_target_properties(boost_date_time PROPERTIES
+    IMPORTED_LOCATION ${PREBUILT_LIBS_DIR}/libboost_date_time.so
+)
+
+# Include directories
+include_directories(
+    ${CMAKE_SOURCE_DIR}/qbittorrent
+)
+
+# Compile options
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_compile_options(-fPIC -fvisibility=hidden)
 add_compile_options(-fno-exceptions -fno-rtti)
 
-find_library(log-lib log)
-find_library(android-lib android)
-find_library(jni-lib jni)
-find_library(openssl-lib crypto)
-find_library(ssl-lib ssl)
-find_library(z-lib z)
-find_library(pthread-lib pthread)
-
-include_directories(
-    ${CMAKE_SOURCE_DIR}/qbittorrent
-    ${LIBTORRENT_DIR}/include
-    ${BOOST_DIR}/include
-    ${OPENSSL_DIR}/include
-)
-
+# Build native library
 add_library(
     qbcore
     SHARED
@@ -54,25 +84,17 @@ target_link_options(qbcore PRIVATE
     -Wl,--as-needed
 )
 
-if(EXISTS ${LIBTORRENT_DIR}/lib/libtorrent.a)
-    message(STATUS "Using prebuilt libtorrent from ${LIBTORRENT_DIR}")
-    target_link_libraries(qbcore
-        ${LIBTORRENT_DIR}/lib/libtorrent.a
-    )
-else()
-    message(WARNING "libtorrent not found at ${LIBTORRENT_DIR}, using system")
-    find_library(lt-lib libtorrent)
-    if(lt-lib)
-        target_link_libraries(qbcore ${lt-lib})
-    endif()
-endif()
-
+# Link libraries
 target_link_libraries(qbcore
+    libtorrent
+    ssl
+    crypto
+    boost_system
+    boost_filesystem
+    boost_date_time
     ${log-lib}
     ${android-lib}
     ${jni-lib}
-    ${openssl-lib}
-    ${ssl-lib}
     ${z-lib}
     ${pthread-lib}
     atomic
