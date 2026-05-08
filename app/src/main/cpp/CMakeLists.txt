@@ -25,13 +25,10 @@ set(OPENSSL_LIB_DIR "${OPENSSL_ROOT_DIR}/lib")
 
 set(BOOST_DIR "$ENV{BOOST_DIR}")
 set(BOOST_LIB_PATH "$ENV{BOOST_LIB_PATH}")
+set(BOOST_INCLUDE_PATH "$ENV{BOOST_INCLUDE_PATH}")
 
 if(EXISTS "${BOOST_DIR}")
-    set(BOOST_INCLUDE_DIR "${BOOST_DIR}")
-    if(EXISTS "${BOOST_INCLUDE_DIR}/libs/arm64-v8a")
-        set(BOOST_INCLUDE_DIR "${BOOST_DIR}/libs/arm64-v8a")
-    endif()
-    include_directories(${BOOST_INCLUDE_DIR})
+    include_directories(${BOOST_INCLUDE_PATH})
 endif()
 
 if(EXISTS "${OPENSSL_INCLUDE_DIR}")

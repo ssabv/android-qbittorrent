@@ -109,100 +109,88 @@ jobs:
         echo "OPENSSL_DIR=$OPENSSL_DIR" >> $GITHUB_ENV
         echo "Set OPENSSL_DIR=$OPENSSL_DIR"
 
-    - name: Build Step 2 - Download Boost static libs
+    - name: Build Step 2 - Build Boost from source for Android arm64-v8a
       run: |
         set -e
-        echo "=== Step 2: Getting Boost for Android arm64-v8a ==="
+        echo "=== Step 2: Building Boost for Android arm64-v8a ==="
 
         cd /tmp
 
-        echo "=== Downloading Boost 1.87.0 static libs for arm64-v8a (dec1/Boost-for-Android) ==="
-        curl -L "https://github.com/dec1/Boost-for-Android/releases/download/ndk_27c_boost_1.87.0/ndk_27c_boost_1.87.0.zip" -o boost-arm64.zip
+        BOOST_VERSION="1.87.0"
+        NDK_VERSION="27.0.12077973"
+        NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
 
-        FILE_TYPE=$(file boost-arm64.zip)
-        echo "=== File type: $FILE_TYPE ==="
+        echo "=== Downloading Boost $BOOST_VERSION ==="
+        curl -L "https://boostorg.jfrog.io/artifactory/source/boost_${BOOST_VERSION}.tar.gz" -o boost.tar.gz
 
-        rm -rf boost-arm64 boost-extract
+        echo "=== Extracting ==="
+        rm -rf boost-$BOOST_VERSION
+        tar -xzf boost.tar.gz
+        cd boost-$BOOST_VERSION
 
-        echo "=== Extracting ZIP ==="
-        unzip -q boost-arm64.zip -d boost-extract
+        echo "=== Bootstrap ==="
+        ./bootstrap.sh --with-toolchain=clang
 
-        echo "=== Directory structure after unzip ==="
-        find boost-extract -maxdepth 3 -type d | head -20
+        TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+        CLANG_CXX="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
+        CLANG_C="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
 
-        echo "=== Finding boost_*.a files ==="
-        find boost-extract -name "libboost_*.a" 2>/dev/null | head -20
+        echo "=== Building Boost with b2 ==="
+        ./b2 headers
 
-        BOOST_A_FILES=$(find boost-extract -name "libboost_*.a" 2>/dev/null)
-        if [ -z "$BOOST_A_FILES" ]; then
-          echo "ERROR: No boost static libs found!"
-          exit 1
-        fi
+        ./b2 -j$(nproc) \
+          toolchain=clang \
+          target-os=android \
+          architecture=arm \
+          variant=release \
+          link=static \
+          runtime-link=shared \
+          python=none \
+          --without-python \
+          --without-mpi \
+          --without-test \
+          --without-log \
+          --without-locale \
+          cxxstd=17 \
+          define=BOOST_EXCEPTION_DISABLE \
+          include="$TOOLCHAIN/sysroot/usr/include/aarch64-linux-android" \
+          include="$TOOLCHAIN/libcxx/include/aarch64-linux-android" \
+          include="$TOOLCHAIN/libcxx/include" \
+          -sBOOST_HEADER_ONLY=0 \
+          system/filesystem/date_time/thread/regex variant=release link=static runtime-link=shared \
+          stage
 
-        BOOST_LIB_DIR=$(dirname $(find boost-extract -name "libboost_system.a" 2>/dev/null | head -1))
-        echo "=== BOOST_LIB_DIR: $BOOST_LIB_DIR ==="
-        ls -la "$BOOST_LIB_DIR/"
+        echo "=== Checking built libraries ==="
+        ls -la stage/lib/
+        ls -lh stage/lib/libboost_*.a
 
-        BOOST_INCLUDE_DIR=$(find boost-extract -type d -name "boost" 2>/dev/null | head -1)
-        if [ -z "$BOOST_INCLUDE_DIR" ]; then
-          BOOST_INCLUDE_DIR=$(find boost-extract -maxdepth 2 -type d -name "include" 2>/dev/null | head -1)
-        fi
-        echo "=== BOOST_INCLUDE_DIR: $BOOST_INCLUDE_DIR ==="
+        echo "=== Verifying architecture ==="
+        for lib in stage/lib/libboost_*.a; do
+          if [ -f "$lib" ]; then
+            file "$lib" | head -1
+          fi
+        done
 
         mkdir -p boost-arm64
-        cp -r boost-extract/* boost-arm64/ 2>/dev/null || true
+        cp -r stage/lib/* boost-arm64/
+        mkdir -p boost-arm64/include
+        cp -r boost boost-arm64/include/
 
-        echo "=== Final boost-arm64 structure ==="
+        echo "=== BOOST artifact ==="
         ls -la boost-arm64/
-        find boost-arm64 -maxdepth 2 -type d | head -10
-
-        mv "$BOOST_LIB_DIR" boost-arm64/libs 2>/dev/null || true
-        if [ -n "$BOOST_INCLUDE_DIR" ]; then
-          mkdir -p boost-arm64/include
-          cp -r "$BOOST_INCLUDE_DIR" boost-arm64/include/boost 2>/dev/null || true
-        fi
-
-        echo "=== Final structure ==="
-        find boost-arm64 -name "*.a" | head -10
-        ls -la boost-arm64/libs/ 2>/dev/null || ls -la boost-arm64/
-
-        BOOST_LIB=""
-        for dir in boost-arm64/libs/arm64-v8a boost-arm64/lib/arm64-v8a boost-arm64/libs boost-arm64/lib; do
-          if [ -d "$PWD/$dir" ] && [ -n "$(ls $PWD/$dir/libboost_*.a 2>/dev/null)" ]; then
-            BOOST_LIB="$PWD/$dir"
-            break
-          fi
-        done
-
-        if [ -z "$BOOST_LIB" ]; then
-          BOOST_LIB=$(find boost-arm64 -name "libboost_system.a" -exec dirname {} \; 2>/dev/null | head -1)
-        fi
-
-        if [ -z "$BOOST_LIB" ] || [ ! -d "$BOOST_LIB" ]; then
-          echo "ERROR: Could not find Boost lib directory!"
-          find boost-arm64 -name "*.a" 2>/dev/null
-          exit 1
-        fi
-
-        echo "BOOST_LIB path: $BOOST_LIB"
-        ls -la "$BOOST_LIB/"
-
-        echo "=== Verifying Boost static libs ==="
-        for lib in boost_system boost_filesystem boost_date_time boost_thread boost_regex; do
-          if [ -f "$BOOST_LIB/lib${lib}.a" ]; then
-            echo "FOUND lib${lib}.a: $BOOST_LIB/lib${lib}.a"
-            ls -lh "$BOOST_LIB/lib${lib}.a"
-          else
-            echo "WARNING: lib${lib}.a not found"
-          fi
-        done
+        ls -la boost-arm64/include/boost/ 2>/dev/null | head -10
 
         BOOST_DIR="$PWD/boost-arm64"
-        BOOST_LIB_PATH="$BOOST_LIB"
+        BOOST_LIB_PATH="$BOOST_DIR"
+        BOOST_INCLUDE_PATH="$BOOST_DIR/include"
+
         echo "BOOST_DIR=$BOOST_DIR" >> $GITHUB_ENV
         echo "BOOST_LIB_PATH=$BOOST_LIB_PATH" >> $GITHUB_ENV
+        echo "BOOST_INCLUDE_PATH=$BOOST_INCLUDE_PATH" >> $GITHUB_ENV
+
         echo "Set BOOST_DIR=$BOOST_DIR"
         echo "Set BOOST_LIB_PATH=$BOOST_LIB_PATH"
+        echo "Set BOOST_INCLUDE_PATH=$BOOST_INCLUDE_PATH"
 
     - name: Build Step 3 - Build libqbcore.so with OpenSSL + Boost static linking
       run: |
