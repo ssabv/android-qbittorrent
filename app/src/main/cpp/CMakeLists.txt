@@ -23,6 +23,17 @@ set(OPENSSL_ROOT_DIR "$ENV{OPENSSL_DIR}")
 set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include")
 set(OPENSSL_LIB_DIR "${OPENSSL_ROOT_DIR}/lib")
 
+set(BOOST_DIR "$ENV{BOOST_DIR}")
+set(BOOST_LIB_PATH "$ENV{BOOST_LIB_PATH}")
+
+if(EXISTS "${BOOST_DIR}")
+    set(BOOST_INCLUDE_DIR "${BOOST_DIR}")
+    if(EXISTS "${BOOST_INCLUDE_DIR}/libs/arm64-v8a")
+        set(BOOST_INCLUDE_DIR "${BOOST_DIR}/libs/arm64-v8a")
+    endif()
+    include_directories(${BOOST_INCLUDE_DIR})
+endif()
+
 if(EXISTS "${OPENSSL_INCLUDE_DIR}")
     include_directories(${OPENSSL_INCLUDE_DIR})
 endif()
@@ -53,6 +64,18 @@ if(EXISTS "${OPENSSL_LIB_DIR}/libssl.a")
         "${OPENSSL_LIB_DIR}/libssl.a"
         "${OPENSSL_LIB_DIR}/libcrypto.a"
     )
+endif()
+
+if(BOOST_LIB_PATH AND EXISTS "${BOOST_LIB_PATH}")
+    if(EXISTS "${BOOST_LIB_PATH}/libboost_system.a")
+        target_link_libraries(qbcore
+            "${BOOST_LIB_PATH}/libboost_system.a"
+            "${BOOST_LIB_PATH}/libboost_filesystem.a"
+            "${BOOST_LIB_PATH}/libboost_date_time.a"
+            "${BOOST_LIB_PATH}/libboost_thread.a"
+            "${BOOST_LIB_PATH}/libboost_regex.a"
+        )
+    endif()
 endif()
 
 add_custom_command(TARGET qbcore POST_BUILD
