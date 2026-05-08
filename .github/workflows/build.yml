@@ -172,7 +172,9 @@ jobs:
         export JAVA_HOME=$JAVA_HOME_17
         chmod +x gradlew
         echo "=== Starting Gradle build ==="
-        ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
+        ./gradlew assembleDebug --no-daemon 2>&1 | tee /tmp/gradle-output.txt
+        echo "=== Gradle output (last 200 lines) ==="
+        tail -200 /tmp/gradle-output.txt
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
