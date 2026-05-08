@@ -3,13 +3,9 @@ name: Build libtorrent Dependencies
 on:
   workflow_dispatch:
     inputs:
-      libtorrent_version:
-        description: 'libtorrent version'
-        default: '2.0.9'
-        required: false
-      boost_version:
-        description: 'Boost version'
-        default: '1.84.0'
+      step:
+        description: 'Build step (1=hello-jni, 2=openssl, 3=boost, 4=libtorrent)'
+        default: '1'
         required: false
 
 env:
@@ -40,127 +36,87 @@ jobs:
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
         $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
         
-    - name: Install build dependencies
+    - name: Verify NDK toolchain
       run: |
-        sudo apt-get update
-        sudo apt-get install -y python3 python3-pip wget tar gzip
+        echo "=== NDK Toolchain Verification ==="
         
-    - name: Build Boost for Android arm64
+        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
+        echo "NDK Path: $NDK_PATH"
+        echo "NDK Contents:"
+        ls -la $NDK_PATH/
+        
+        echo ""
+        echo "=== Clang Compiler ==="
+        which aarch64-linux-android21-clang++
+        aarch64-linux-android21-clang++ --version
+        
+        echo ""
+        echo "=== CMake ==="
+        which cmake
+        cmake --version
+        
+    - name: Build Step 1 - Hello JNI
+      if: github.event.inputs.step == '1' || github.event.inputs.step == ''
       run: |
-        cd /tmp
+        echo "=== Step 1: Building hello-jni.so ==="
         
-        BOOST_VERSION=1.84.0
-        echo "=== Downloading Boost $BOOST_VERSION ==="
-        wget -q https://boostorg.jfrog.io/artifactory/main/release/$BOOST_VERSION/source/boost_$BOOST_VERSION.tar.gz
+        mkdir -p /tmp/hello-jni
+        cd /tmp/hello-jni
         
-        tar -xzf boost_$BOOST_VERSION.tar.gz
-        cd boost_$BOOST_VERSION
-        
-        echo "=== Bootstrapping Boost ==="
-        ./bootstrap.sh --with-libraries=system,filesystem,date_time
-        
-        echo "=== Building Boost ==="
-        cat > user-config.jam << 'EOF'
-using clang : arm64 : aarch64-linux-android21-clang++ : : <archflags>-march=armv8-a <linkflags>-Wl,--gc-sections ;
+        # Create hello.c
+        cat > hello.c << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+
+JNIEXPORT jint JNICALL Java_com_example_hello_HelloNative_sayHello(JNIEnv *env, jobject this) {
+    printf("Hello from JNI!\n");
+    return 42;
+}
 EOF
         
-        ./b2 install \
-          toolset=clang-arm64 \
-          variant=release \
-          link=static \
-          threading=multi \
-          cxxstd=17 \
-          --prefix=/tmp/boost-install \
-          --with-system \
-          --with-filesystem \
-          --with-date_time \
-          -j$(nproc) \
-          stage
+        # Create CMakeLists.txt
+        cat > CMakeLists.txt << 'EOF'
+cmake_minimum_required(VERSION 3.22.1)
+project(hello-jni)
+
+add_library(hello-jni SHARED hello.c)
+target_compile_options(hello-jni PRIVATE -fPIC -fvisibility=hidden)
+EOF
         
-        echo "=== Boost build complete ==="
-        ls -la /tmp/boost-install/lib/
+        # Create Android.mk
+        cat > Android.mk << 'EOF'
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE    := hello-jni
+LOCAL_SRC_FILES := hello.c
+include $(BUILD_SHARED_LIBRARY)
+EOF
         
-    - name: Build OpenSSL for Android arm64
-      run: |
-        cd /tmp
+        # Build with CMake
+        mkdir -p build
+        cd build
         
-        echo "=== Downloading OpenSSL 3.2.1 ==="
-        wget -q https://github.com/openssl/openssl/releases/download/openssl-3.2.1/openssl-3.2.1.tar.gz
-        tar -xzf openssl-3.2.1.tar.gz
-        cd openssl-3.2.1
+        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
         
-        echo "=== Configuring OpenSSL ==="
-        ./Configure android-arm64 --prefix=/tmp/openssl-install
+        cmake .. \
+          -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+          -DANDROID_PLATFORM=android-24 \
+          -DANDROID_ABI=arm64-v8a \
+          -DCMAKE_BUILD_TYPE=Release
         
-        echo "=== Building OpenSSL ==="
-        make -j$(nproc)
-        make install_sw
+        cmake --build . -- -j$(nproc)
         
-        echo "=== OpenSSL build complete ==="
-        ls -la /tmp/openssl-install/lib/
+        echo "=== Build Output ==="
+        ls -la
         
-    - name: Build libtorrent for Android arm64
-      run: |
-        cd /tmp
-        
-        LIBTORRENT_VERSION=2.0.9
-        echo "=== Downloading libtorrent $LIBTORRENT_VERSION ==="
-        wget -q https://github.com/arvidn/libtorrent/releases/download/v$LIBTORRENT_VERSION/libtorrent-$LIBTORRENT_VERSION.tar.gz
-        tar -xzf libtorrent-$LIBTORRENT_VERSION.tar.gz
-        cd libtorrent-$LIBTORRENT_VERSION
-        
-        echo "=== Configuring libtorrent ==="
-        
-        ./configure \
-          --prefix=/tmp/libtorrent-install \
-          --enable-arch=native \
-          --disable-shared-encryption \
-          --with-boost=/tmp/boost-install \
-          --with-openssl=/tmp/openssl-install \
-          --host=aarch64-linux-android \
-          CXXFLAGS="-stdlib=libc++ -fPIC -fvisibility=hidden -fno-exceptions -fno-rtti -march=armv8-a" \
-          CXX=aarch64-linux-android21-clang++ \
-          CC=aarch64-linux-android21-clang
-        
-        echo "=== Building libtorrent ==="
-        make -j$(nproc)
-        
-        echo "=== Installing libtorrent ==="
-        make install
-        
-        echo "=== libtorrent build complete ==="
-        ls -la /tmp/libtorrent-install/lib/
-        
-    - name: Prepare jniLibs directory
-      run: |
-        mkdir -p app/src/main/jniLibs/arm64-v8a
-        
-        cp /tmp/libtorrent-install/lib/libtorrent.so app/src/main/jniLibs/arm64-v8a/
-        cp /tmp/openssl-install/lib/libssl.so app/src/main/jniLibs/arm64-v8a/
-        cp /tmp/openssl-install/lib/libcrypto.so app/src/main/jniLibs/arm64-v8a/
-        
-        if [ -f /tmp/boost-install/lib/libboost_system.so ]; then
-          cp /tmp/boost-install/lib/libboost_system.so app/src/main/jniLibs/arm64-v8a/
-        elif [ -f /tmp/boost-install/lib/libboost_system.a ]; then
-          cp /tmp/boost-install/lib/libboost_system.a app/src/main/jniLibs/arm64-v8a/
-        fi
-        
-        if [ -f /tmp/boost-install/lib/libboost_filesystem.so ]; then
-          cp /tmp/boost-install/lib/libboost_filesystem.so app/src/main/jniLibs/arm64-v8a/
-        elif [ -f /tmp/boost-install/lib/libboost_filesystem.a ]; then
-          cp /tmp/boost-install/lib/libboost_filesystem.a app/src/main/jniLibs/arm64-v8a/
-        fi
-        
-        if [ -f /tmp/boost-install/lib/libboost_date_time.so ]; then
-          cp /tmp/boost-install/lib/libboost_date_time.so app/src/main/jniLibs/arm64-v8a/
-        elif [ -f /tmp/boost-install/lib/libboost_date_time.a ]; then
-          cp /tmp/boost-install/lib/libboost_date_time.a app/src/main/jniLibs/arm64-v8a/
-        fi
-        
-        echo "=== Final jniLibs contents ==="
-        ls -la app/src/main/jniLibs/arm64-v8a/
-        
-    - name: Upload libtorrent artifacts
+        echo "=== Copy to jniLibs ==="
+        mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+        cp libhello-jni.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
+        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+
+    - name: Upload Step 1 artifact
+      if: github.event.inputs.step == '1' || github.event.inputs.step == ''
       uses: actions/upload-artifact@v4
       with:
         name: android-libtorrent-arm64-v8a
