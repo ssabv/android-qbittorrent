@@ -1,4 +1,4 @@
-#include "../qbcore.h"
+#include "qbcore.h"
 
 struct QBittorrentCore::Impl {
 };
