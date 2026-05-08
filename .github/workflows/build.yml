@@ -8,9 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NDK: /usr/local/lib/android/sdk/ndk/27.0.12077973
+      ANDROID_API: 35
+      ABI: arm64-v8a
     steps:
       # -----------------------
-      # Stage 1: Checkout code
+      # Stage 1: Checkout & Setup
       # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
@@ -28,62 +31,96 @@ jobs:
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
           echo "SDK/NDK setup complete"
+          ls -la $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -10
 
       # -----------------------
-      # Stage 2: OpenSSL static linking
+      # Stage 2: OpenSSL static libs (prebuilt)
       # -----------------------
-      - name: Prepare OpenSSL static libs
+      - name: Download OpenSSL static libs
         run: |
-          echo "Assume OpenSSL static libs exist at /tmp/openssl-arm64/lib"
+          echo "=== Downloading OpenSSL for Android arm64-v8a ==="
+          cd /tmp
+          curl -L -o openssl-arm64.tar.gz "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz"
+          mkdir -p openssl-arm64
+          tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
+          ls -la openssl-arm64/lib/
+          echo "OPENSSL_DIR=/tmp/openssl-arm64" >> $GITHUB_ENV
 
       # -----------------------
-      # Stage 3: Boost static libraries for arm64-v8a
+      # Stage 3: Boost static libs (from source)
       # -----------------------
-      - name: Build Boost for Android arm64-v8a
-        shell: bash
+      - name: Download and Build Boost for Android arm64-v8a
         run: |
           set -e
-          BOOST_DIR=$PWD/boost
-          mkdir -p "$BOOST_DIR"
+          echo "=== Downloading Boost ==="
+          cd /tmp
+          BOOST_VERSION="1.84.0"
+          curl -L -o boost.tar.gz "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION}.tar.gz" \
+            --connect-timeout 60 --max-time 900
+          
+          FILE_TYPE=$(file boost.tar.gz)
+          echo "Downloaded: $FILE_TYPE"
+          
+          if [[ "$FILE_TYPE" == *"HTML"* ]] || [[ ! "$FILE_TYPE" == *"gzip"* ]]; then
+            echo "Warning: Download may have failed, checking..."
+            head -c 200 boost.tar.gz
+            echo "Using alternative version..."
+            rm -f boost.tar.gz
+            curl -L -o boost.tar.gz "https://archives.boost.io/release/1.83.0/source/boost_1.83.0.tar.gz" \
+              --connect-timeout 60 --max-time 900
+          fi
 
-          # 假设源码已存在，或提前上传 artifact
-          echo "Using local Boost source in $BOOST_DIR"
+          echo "=== Extracting Boost ==="
+          rm -rf boost-$BOOST_VERSION
+          mkdir -p boost-$BOOST_VERSION
+          tar -xzf boost.tar.gz -C boost-$BOOST_VERSION --strip-components=1
+          ls -la boost-$BOOST_VERSION/
 
-          # 设置 Android 工具链
-          export NDK=/usr/local/lib/android/sdk/ndk/27.0.12077973
-          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
-          export ANDROID_API=35
-          export ABI=arm64-v8a
-          export PATH=$TOOLCHAIN/bin:$PATH
-          export CC=$TOOLCHAIN/bin/aarch64-linux-android$ANDROID_API-clang
-          export CXX=$TOOLCHAIN/bin/aarch64-linux-android$ANDROID_API-clang++
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-
-          cd "$BOOST_DIR"
+          echo "=== Building Boost ==="
+          cd boost-$BOOST_VERSION
+          
+          export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          export CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$ANDROID_API-clang
+          export CXX=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$ANDROID_API-clang++
+          
           ./bootstrap.sh
-          ./b2 toolset=clang cxxflags="-fPIC -fexceptions -frtti" link=static threading=multi \
-              --with-system --with-filesystem --with-date_time --with-thread --with-regex stage
+          
+          ./b2 toolset=clang \
+            cxxflags="-fPIC -fexceptions -frtti" \
+            link=static threading=multi \
+            --with-system --with-filesystem --with-date_time --with-thread --with-regex \
+            target-os=android architecture=arm address-model=64 abi=aapcs \
+            stage
 
-          echo "Boost static libs built:"
-          ls -lh stage/lib
+          echo "=== Boost static libs ==="
+          ls -lh stage/lib/
+          
+          echo "BOOST_DIR=/tmp/boost-$BOOST_VERSION" >> $GITHUB_ENV
 
       # -----------------------
       # Stage 3: Build libqbcore.so
       # -----------------------
       - name: Build libqbcore.so
-        shell: bash
         run: |
-          mkdir -p build
-          cd build
+          echo "=== Building libqbcore.so ==="
+          cd $GITHUB_WORKSPACE
+          
+          mkdir -p app/src/main/cpp/build
+          cd app/src/main/cpp/build
+          
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=$ABI \
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
-            -DBOOST_ROOT=$BOOST_DIR \
-            -DOPENSSL_ROOT_DIR=/tmp/openssl-arm64
+            -DBOOST_ROOT=${{ env.BOOST_DIR }} \
+            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }}
+          
           cmake --build . --target qbcore
+          
+          echo "=== libqbcore.so ==="
+          ls -lh libqbcore.so
+          file libqbcore.so
 
       # -----------------------
       # Stage 3: Upload native artifact
@@ -92,7 +129,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-native-arm64-v8a
-          path: build/libqbcore.so
+          path: app/src/main/cpp/build/libqbcore.so
 
   build-apk:
     needs: build-native
@@ -101,7 +138,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       # -----------------------
-      # Stage 1: Checkout code
+      # Stage 1: Checkout & Setup
       # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
@@ -112,7 +149,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK & NDK
+      - name: Setup Android SDK
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip wget
@@ -133,11 +170,11 @@ jobs:
       # -----------------------
       - name: Build APK
         run: |
-          cd app
+          cd $GITHUB_WORKSPACE/app
           ./gradlew assembleDebug
 
       # -----------------------
-      # Stage 4: Upload APK artifact
+      # Stage 4: Upload APK
       # -----------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
