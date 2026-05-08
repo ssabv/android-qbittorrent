@@ -107,6 +107,11 @@ jobs:
           echo "=== Building libqbcore.so ==="
           cd $GITHUB_WORKSPACE
           
+          # Debug: print env vars
+          echo "BOOST_DIR: $BOOST_DIR"
+          echo "BOOST_LIB_DIR: $BOOST_LIB_DIR"
+          echo "OPENSSL_DIR: $OPENSSL_DIR"
+          
           mkdir -p app/src/main/cpp/build
           cd app/src/main/cpp/build
           
@@ -117,16 +122,11 @@ jobs:
             -DANDROID_STL=c++_shared \
             -DBOOST_ROOT=${{ env.BOOST_DIR }} \
             -DBOOST_LIB_DIR=${{ env.BOOST_LIB_DIR }} \
-            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }}
+            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }} \
+            -DCMAKE_VERBOSE_LOGGING=ON
           
-          cmake --build . --target qbcore
-          
-          echo "=== libqbcore.so built ==="
-          ls -lh libqbcore.so
-          file libqbcore.so
-          
-          echo "=== readelf check ==="
-          readelf -d libqbcore.so | grep NEEDED
+          echo "=== CMake output ==="
+          cmake --build . --target qbcore -- -VERBOSE=1 2>&1 | tail -100
 
       # -----------------------
       # Stage 3: Upload native artifact
