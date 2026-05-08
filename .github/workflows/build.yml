@@ -95,6 +95,10 @@ jobs:
           name: android-native-arm64-v8a
           path: app/src/main/jniLibs/arm64-v8a
 
+      - name: Verify download
+        run: |
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+
       - name: Build APK
         run: |
           cd $GITHUB_WORKSPACE/app
