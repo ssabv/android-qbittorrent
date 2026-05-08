@@ -76,7 +76,7 @@ jobs:
           find boost-arm64 -name "*.a" | head -10
           
           # Find boost libraries
-          BOOST_LIB_DIR=$(find boost-arm64 -name "libboost_system.a" -exec dirname {} \; | head -1)
+          BOOST_LIB_DIR=$(find boost-arm64 -name "libboost_system.a" -type f -exec dirname {} \; | grep "arm64-v8a" | head -1)
           if [ -z "$BOOST_LIB_DIR" ]; then
             echo "ERROR: Boost libs not found"
             find boost-arm64 -type f -name "*.a" 2>/dev/null | head -5
