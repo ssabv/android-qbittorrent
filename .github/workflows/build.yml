@@ -31,35 +31,36 @@ jobs:
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
         $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
         
-    - name: Prepare jniLibs with stub libraries
-      run: |
-        mkdir -p app/src/main/jniLibs/arm64-v8a
+    - name: Download libtorrent artifact
+      id: download-lib
+      uses: actions/download-artifact@v4
+      with:
+        name: android-libtorrent-arm64-v8a
+        path: app/src/main/jniLibs/arm64-v8a
         
-        # Create stub .so files
-        for lib in libtorrent libssl libcrypto libboost_system libboost_filesystem libboost_date_time; do
-          echo "STUB" > app/src/main/jniLibs/arm64-v8a/${lib}.so
-        done
+    - name: Check downloaded files
+      run: |
+        echo "=== Downloaded jniLibs ==="
         ls -la app/src/main/jniLibs/arm64-v8a/
         
-    - name: Build APK with verbose output
+        # Check if files exist
+        if [ ! -f "app/src/main/jniLibs/arm64-v8a/libtorrent.so" ]; then
+          echo "WARNING: libtorrent.so not found!"
+          echo "Please run build-libtorrent.yml workflow first"
+        fi
+        
+    - name: Build APK
       run: |
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export JAVA_HOME=$JAVA_HOME_17
         chmod +x gradlew
         
-        # Build with full output
-        ./gradlew assembleDebug --no-daemon --info 2>&1 | tee /tmp/gradle_output.txt
-        
-        # Check what was created
-        echo "=== Build outputs ==="
-        find app/build -name "*.apk" 2>/dev/null || echo "No APK found"
-        ls -la app/build/outputs/apk/debug/ 2>/dev/null || echo "No debug APK dir"
+        echo "=== Starting Gradle build ==="
+        ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
         
     - name: Upload APK
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: app-debug
-        path: |
-          app/build/outputs/apk/debug/*.apk
-          /tmp/gradle_output.txt
+        path: app/build/outputs/apk/debug/app-debug.apk
