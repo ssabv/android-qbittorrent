@@ -19,8 +19,6 @@ add_library(
     qbcore
     SHARED
     native-lib.cpp
-    qbittorrent/qbcore.cpp
-    qbittorrent/cJSON.c
 )
 
 target_compile_options(qbcore PRIVATE
