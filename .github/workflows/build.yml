@@ -39,41 +39,40 @@ jobs:
         run: |
           set -e
 
-          BOOST_VERSION="1.87.0"
-          BOOST_DIR=$PWD/boost
-          BOOST_TAR="boost_${BOOST_VERSION}.tar.gz"
-
-          echo "=== Downloading Boost $BOOST_VERSION ==="
-
-          for url in \
-            "https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}" \
-            "https://mirrors.edge.kernel.org/gentoo/distfiles/${BOOST_TAR}" \
-            "https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION}/${BOOST_TAR}/download"
-          do
-            echo "Trying: $url"
+          # Try multiple Boost versions to find one that works
+          for BOOST_VERSION in "1.86.0" "1.85.0" "1.84.0" "1.83.0" "1.82.0" "1.81.0"; do
+            echo "=== Trying Boost $BOOST_VERSION ==="
+            BOOST_TAR="boost_${BOOST_VERSION}.tar.gz"
+            
+            # Try archives.boost.io first
+            BOOST_URL="https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}"
+            echo "URL: $BOOST_URL"
             rm -f "$BOOST_TAR"
-            if curl -L --connect-timeout 30 --max-time 300 -o "$BOOST_TAR" "$url"; then
-              FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
-              echo "File type: $FILE_TYPE"
-              if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"tar"* ]]; then
-                echo "Success! Got valid archive"
-                break
-              fi
+            curl -L --connect-timeout 30 --max-time 600 -o "$BOOST_TAR" "$BOOST_URL" 2>&1 || true
+            
+            FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
+            echo "File type: $FILE_TYPE"
+            
+            if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"POSIX tar"* ]]; then
+              echo "Success! Got Boost $BOOST_VERSION"
+              break
             fi
-            echo "Failed, trying next URL..."
+            
+            rm -f "$BOOST_TAR"
+            echo "Failed for $BOOST_VERSION, trying next..."
           done
 
           FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
           echo "Final file type: $FILE_TYPE"
 
-          if [[ ! "$FILE_TYPE" == *"gzip"* ]] && [[ ! "$FILE_TYPE" == *"tar"* ]]; then
-            echo "ERROR: All download attempts failed"
+          if [[ ! "$FILE_TYPE" == *"gzip"* ]] && [[ ! "$FILE_TYPE" == *"POSIX tar"* ]]; then
+            echo "ERROR: All Boost download attempts failed"
             ls -la "$BOOST_TAR" 2>/dev/null || echo "File not found"
-            head -c 500 "$BOOST_TAR" 2>/dev/null || true
             exit 1
           fi
 
           echo "=== Extracting Boost source ==="
+          BOOST_DIR=$PWD/boost
           rm -rf "$BOOST_DIR"
           mkdir -p "$BOOST_DIR"
           tar -xzf "$BOOST_TAR" -C "$BOOST_DIR" --strip-components=1
