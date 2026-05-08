@@ -19,6 +19,9 @@ jobs:
       ANDROID_API: 35
       ABI: arm64-v8a
     steps:
+      # -----------------------
+      # Stage 1: Checkout code
+      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -35,7 +38,9 @@ jobs:
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
 
+      # -----------------------
       # Stage 2: OpenSSL static libs
+      # -----------------------
       - name: Download OpenSSL static libs
         run: |
           echo "=== OpenSSL for Android arm64-v8a ==="
@@ -44,14 +49,13 @@ jobs:
           mkdir -p openssl-arm64
           tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
           ls -la openssl-arm64/lib/
-          echo "OPENSSL_DIR=/tmp/openssl-arm64" >> $GITHUB_ENV
 
-      # Stage 3: Build libqbcore.so (OpenSSL only, skip Boost for now)
+      # -----------------------
+      # Stage 3: Build libqbcore.so
+      # -----------------------
       - name: Build libqbcore.so
         run: |
           echo "=== Building libqbcore.so ==="
-          echo "OPENSSL_DIR: $OPENSSL_DIR"
-          
           cd $GITHUB_WORKSPACE
           mkdir -p app/src/main/cpp/build
           cd app/src/main/cpp/build
@@ -61,57 +65,35 @@ jobs:
             -DANDROID_ABI=$ABI \
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
-            -DOPENSSL_DIR=$OPENSSL_DIR 2>&1 | tail -30
+            -DOPENSSL_DIR=/tmp/openssl-arm64
           
-          cmake --build . --target qbcore 2>&1 | tail -50
+          cmake --build . --target qbcore
+          
+          echo "=== libqbcore.so built ==="
+          ls -lh libqbcore.so
+          file libqbcore.so
+          readelf -d libqbcore.so | grep NEEDED
 
-      - name: Upload native artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-native
-          path: app/src/main/cpp/build/libqbcore.so
-
-  build-apk:
-    needs: build-native
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Android SDK
+      # -----------------------
+      # Stage 3: Copy to jniLibs (avoid artifact issue)
+      # -----------------------
+      - name: Copy native lib to jniLibs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip wget
-          export ANDROID_HOME=/usr/local/lib/android/sdk
+          mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+          cp $GITHUB_WORKSPACE/app/src/main/cpp/build/libqbcore.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
 
-      - name: Download native artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-native
-          path: ./native-lib
-
-      - name: Show downloaded files
-        run: |
-          echo "Downloaded files:"
-          ls -la ./native-lib/
-          ls -la ./native-lib/*.so 2>/dev/null || echo "No .so found"
-
+      # -----------------------
+      # Stage 4: Build APK (same job - no artifact needed)
+      # -----------------------
       - name: Build APK
         run: |
           cd $GITHUB_WORKSPACE/app
           ./gradlew assembleDebug
 
+      # -----------------------
+      # Stage 4: Upload APK artifact
+      # -----------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
