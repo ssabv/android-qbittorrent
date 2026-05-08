@@ -36,23 +36,40 @@ jobs:
         # Create jniLibs directory
         mkdir -p app/src/main/jniLibs/arm64-v8a
         
-        # Download frostwire jlibtorrent Android arm64 release
+        # Download frostwire jlibtorrent Android arm64 release with redirect follow
         JAR_URL="https://github.com/frostwire/frostwire-jlibtorrent/releases/download/release/2.0.12.7/jlibtorrent-android-arm64-2.0.12.7.jar"
         
-        # Download the JAR
-        wget -q -O /tmp/jlibtorrent-android-arm64.jar "$JAR_URL"
+        echo "Downloading from: $JAR_URL"
         
-        # Extract .so files from JAR
-        cd /tmp
-        unzip -o jlibtorrent-android-arm64.jar "lib/*.so" -d extracted/
+        # Use curl with -L to follow redirects
+        curl -L -o /tmp/jlibtorrent-android-arm64.jar "$JAR_URL" --retry 3 --retry-delay 5
         
-        # List extracted files
-        ls -la extracted/lib/
-        
-        # Copy to project jniLibs
-        cp extracted/lib/*.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-        
-        ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        if [ -f /tmp/jlibtorrent-android-arm64.jar ]; then
+          echo "Downloaded JAR size: $(ls -lh /tmp/jlibtorrent-android-arm64.jar | awk '{print $5}')"
+          
+          # Check if it's actually a JAR/ZIP
+          file /tmp/jlibtorrent-android-arm64.jar
+          
+          # Extract .so files from JAR
+          cd /tmp
+          unzip -o jlibtorrent-android-arm64.jar "lib/*.so" -d extracted/
+          
+          # List extracted files
+          ls -la extracted/lib/ 2>/dev/null || echo "No lib directory found"
+          
+          # Check if there are any .so files anywhere in the jar
+          unzip -l jlibtorrent-android-arm64.jar | grep "\.so" || echo "No .so files in JAR"
+          
+          # Copy to project jniLibs
+          if [ -d "extracted/lib" ]; then
+            cp extracted/lib/*.so $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          fi
+          
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+        else
+          echo "Failed to download JAR"
+          exit 1
+        fi
         
     - name: Build APK
       run: |
