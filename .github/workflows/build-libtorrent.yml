@@ -17,6 +17,10 @@ on:
         default: '1.84.0'
         required: false
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
