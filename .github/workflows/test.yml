@@ -1,0 +1,29 @@
+name: Test Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hello
+        run: echo "Hello World"
+        
+      - name: Check environment
+        run: |
+          echo "Runner: $(uname -a)"
+          echo "Java: $(which java || echo 'not found')"
+          echo "Python: $(which python3 || echo 'not found')"
+          
+      - name: Create test file
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          echo "test" > app/src/main/jniLibs/arm64-v8a/test.so
+          ls -la app/src/main/jniLibs/arm64-v8a/
+          
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: app/src/main/jniLibs/arm64-v8a/
