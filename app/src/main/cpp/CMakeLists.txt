@@ -14,6 +14,8 @@ endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
 
+find_library(log-lib log)
+
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_compile_options(-fPIC -fvisibility=hidden)
 
@@ -32,6 +34,8 @@ target_compile_options(qbcore PRIVATE
 target_link_options(qbcore PRIVATE
     -Wl,--gc-sections
 )
+
+target_link_libraries(qbcore ${log-lib})
 
 add_custom_command(TARGET qbcore POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Built qBittorrent Core"
