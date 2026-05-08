@@ -47,6 +47,8 @@ jobs:
       - name: Build libqbcore.so
         run: |
           echo "=== Building libqbcore.so ==="
+          echo "OPENSSL_DIR: $OPENSSL_DIR"
+          
           cd $GITHUB_WORKSPACE
           mkdir -p app/src/main/cpp/build
           cd app/src/main/cpp/build
@@ -56,14 +58,9 @@ jobs:
             -DANDROID_ABI=$ABI \
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
-            -DOPENSSL_DIR=${{ env.OPENSSL_DIR }}
+            -DOPENSSL_DIR=$OPENSSL_DIR 2>&1 | tail -30
           
-          cmake --build . --target qbcore
-          
-          echo "=== libqbcore.so ==="
-          ls -lh libqbcore.so
-          file libqbcore.so
-          readelf -d libqbcore.so | grep NEEDED
+          cmake --build . --target qbcore 2>&1 | tail -50
 
       - name: Upload native artifact
         uses: actions/upload-artifact@v4
