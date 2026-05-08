@@ -1,10 +1,6 @@
 name: Android Build
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -13,6 +9,9 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
+      # -----------------------
+      # Stage 1: Checkout code
+      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -30,70 +29,27 @@ jobs:
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
           echo "SDK/NDK setup complete"
 
-      - name: Build OpenSSL static libs (already done or reuse)
+      # -----------------------
+      # Stage 2: OpenSSL static linking
+      # -----------------------
+      - name: Prepare OpenSSL static libs
         run: |
-          echo "Using prebuilt OpenSSL at /tmp/openssl-arm64"
+          echo "Assume OpenSSL static libs exist at /tmp/openssl-arm64/lib"
 
-      - name: Build Boost static libraries for Android arm64-v8a
+      # -----------------------
+      # Stage 3: Boost static libraries for arm64-v8a
+      # -----------------------
+      - name: Build Boost for Android arm64-v8a
         shell: bash
         run: |
           set -e
-          
-          BOOST_VERSION="1.84.0"
           BOOST_DIR=$PWD/boost
-          BOOST_TAR="boost_${BOOST_VERSION}.tar.gz"
-
-          echo "=== Downloading Boost $BOOST_VERSION ==="
-
-          # Try different download methods
-          for method in curl wget; do
-            echo "Trying with $method..."
-            rm -f "$BOOST_TAR"
-            
-            if [ "$method" = "curl" ]; then
-              curl -L --connect-timeout 60 --max-time 900 -o "$BOOST_TAR" "https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}" 2>&1 || true
-            else
-              wget -O "$BOOST_TAR" "https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}" 2>&1 || true
-            fi
-            
-            FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
-            echo "File type: $FILE_TYPE"
-            
-            if [[ "$FILE_TYPE" == *"gzip"* ]] || [[ "$FILE_TYPE" == *"POSIX tar"* ]]; then
-              echo "Success with $method!"
-              break
-            fi
-          done
-
-          FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
-          echo "Final file type: $FILE_TYPE"
-
-          if [[ ! "$FILE_TYPE" == *"gzip"* ]] && [[ ! "$FILE_TYPE" == *"POSIX tar"* ]]; then
-            echo "ERROR: Download failed, trying backup URL..."
-            rm -f "$BOOST_TAR"
-            
-            # Backup: try older version that's more likely to be available
-            BOOST_VERSION="1.83.0"
-            BOOST_TAR="boost_${BOOST_VERSION}.tar.gz"
-            wget -O "$BOOST_TAR" "https://archives.boost.io/release/${BOOST_VERSION}/source/${BOOST_TAR}" 2>&1 || true
-            
-            FILE_TYPE=$(file "$BOOST_TAR" 2>/dev/null || echo "unknown")
-            echo "Backup file type: $FILE_TYPE"
-            
-            if [[ ! "$FILE_TYPE" == *"gzip"* ]] && [[ ! "$FILE_TYPE" == *"POSIX tar"* ]]; then
-              echo "Backup also failed, listing current file:"
-              ls -la "$BOOST_TAR" 2>/dev/null || echo "File not found"
-              head -c 500 "$BOOST_TAR" 2>/dev/null || true
-              exit 1
-            fi
-          fi
-
-          echo "=== Extracting Boost source ==="
-          rm -rf "$BOOST_DIR"
           mkdir -p "$BOOST_DIR"
-          tar -xzf "$BOOST_TAR" -C "$BOOST_DIR" --strip-components=1
-          ls -la "$BOOST_DIR/"
 
+          # 假设源码已存在，或提前上传 artifact
+          echo "Using local Boost source in $BOOST_DIR"
+
+          # 设置 Android 工具链
           export NDK=/usr/local/lib/android/sdk/ndk/27.0.12077973
           export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
           export ANDROID_API=35
@@ -106,14 +62,15 @@ jobs:
 
           cd "$BOOST_DIR"
           ./bootstrap.sh
-          ./b2 toolset=clang \
-            cxxflags="-fPIC -fexceptions -frtti" link=static threading=multi \
-            --with-system --with-filesystem --with-date_time --with-thread --with-regex \
-            target-os=android architecture=arm address-model=64 abi=aapcs stage
+          ./b2 toolset=clang cxxflags="-fPIC -fexceptions -frtti" link=static threading=multi \
+              --with-system --with-filesystem --with-date_time --with-thread --with-regex stage
 
           echo "Boost static libs built:"
           ls -lh stage/lib
 
+      # -----------------------
+      # Stage 3: Build libqbcore.so
+      # -----------------------
       - name: Build libqbcore.so
         shell: bash
         run: |
@@ -128,6 +85,9 @@ jobs:
             -DOPENSSL_ROOT_DIR=/tmp/openssl-arm64
           cmake --build . --target qbcore
 
+      # -----------------------
+      # Stage 3: Upload native artifact
+      # -----------------------
       - name: Upload native artifact
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +100,9 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
+      # -----------------------
+      # Stage 1: Checkout code
+      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -156,17 +119,26 @@ jobs:
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
 
+      # -----------------------
+      # Stage 3: Download native artifact
+      # -----------------------
       - name: Download native artifact
         uses: actions/download-artifact@v4
         with:
           name: android-native-arm64-v8a
           path: app/src/main/jniLibs/arm64-v8a
 
+      # -----------------------
+      # Stage 4: Build APK
+      # -----------------------
       - name: Build APK
         run: |
           cd app
           ./gradlew assembleDebug
-          
+
+      # -----------------------
+      # Stage 4: Upload APK artifact
+      # -----------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
