@@ -1,0 +1,20 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.qbandroid'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.qbandroid"
+        minSdk 24
+        targetSdk 34
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}

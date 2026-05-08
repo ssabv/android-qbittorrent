@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  qbittorrent-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qbittorrent-android-build
+    hostname: qbittorrent-builder
+    environment:
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      - ANDROID_HOME=/opt/android-sdk
+      - ANDROID_NDK_HOME=/opt/android-sdk/ndk/27.0.12077973
+      - GRADLE_HOME=/opt/gradle
+    volumes:
+      - .:/workspace
+      - gradle-cache:/root/.gradle
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+
+volumes:
+  gradle-cache:
