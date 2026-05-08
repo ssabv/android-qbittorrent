@@ -16,9 +16,6 @@ jobs:
       ANDROID_API: 35
       ABI: arm64-v8a
     steps:
-      # -----------------------
-      # Stage 1: Checkout & Setup
-      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -34,15 +31,11 @@ jobs:
           sudo apt-get install -y unzip wget
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-          echo "SDK/NDK setup complete"
-          ls -la $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -5
 
-      # -----------------------
-      # Stage 2: OpenSSL static libs (prebuilt)
-      # -----------------------
+      # Stage 2: OpenSSL static libs
       - name: Download OpenSSL static libs
         run: |
-          echo "=== Downloading OpenSSL for Android arm64-v8a ==="
+          echo "=== OpenSSL for Android arm64-v8a ==="
           cd /tmp
           curl -L -o openssl-arm64.tar.gz "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz"
           mkdir -p openssl-arm64
@@ -50,68 +43,11 @@ jobs:
           ls -la openssl-arm64/lib/
           echo "OPENSSL_DIR=/tmp/openssl-arm64" >> $GITHUB_ENV
 
-      # -----------------------
-      # Stage 3: Boost static libs (PREBUILT - dec1/Boost-for-Android)
-      # -----------------------
-      - name: Download Boost prebuilt static libs
-        run: |
-          echo "=== Downloading prebuilt Boost for Android arm64-v8a ==="
-          cd /tmp
-          curl -L -o boost-arm64.zip "https://github.com/dec1/Boost-for-Android/releases/download/ndk_27c_boost_1.87.0/ndk_27c_boost_1.87.0.zip"
-          
-          FILE_TYPE=$(file boost-arm64.zip)
-          echo "Downloaded: $FILE_TYPE"
-          
-          if [[ "$FILE_TYPE" == *"HTML"* ]]; then
-            echo "ERROR: Download returned HTML"
-            head -c 500 boost-arm64.zip
-            exit 1
-          fi
-          
-          echo "=== Extracting Boost ==="
-          mkdir -p boost-arm64
-          unzip -q boost-arm64.zip -d boost-arm64
-          
-          echo "=== Checking Boost structure ==="
-          find boost-arm64 -name "*.a" | head -10
-          
-          # Find boost libraries
-          BOOST_LIB_DIR=$(find boost-arm64 -name "libboost_system.a" -type f -exec dirname {} \; | grep "arm64-v8a" | head -1)
-          if [ -z "$BOOST_LIB_DIR" ]; then
-            echo "ERROR: Boost libs not found"
-            find boost-arm64 -type f -name "*.a" 2>/dev/null | head -5
-            exit 1
-          fi
-          
-          echo "BOOST_LIB_DIR: $BOOST_LIB_DIR"
-          ls -la "$BOOST_LIB_DIR/"
-          
-          # Verify libraries
-          for lib in system filesystem date_time thread regex; do
-            if [ -f "$BOOST_LIB_DIR/libboost_${lib}.a" ]; then
-              echo "Found: libboost_${lib}.a"
-              ls -lh "$BOOST_LIB_DIR/libboost_${lib}.a"
-            else
-              echo "WARNING: libboost_${lib}.a not found"
-            fi
-          done
-          
-          echo "BOOST_DIR=/tmp/boost-arm64" >> $GITHUB_ENV
-          echo "BOOST_LIB_DIR=$BOOST_LIB_DIR" >> $GITHUB_ENV
-
-      # -----------------------
-      # Stage 3: Build libqbcore.so
-      # -----------------------
+      # Stage 3: Build libqbcore.so (OpenSSL only, skip Boost for now)
       - name: Build libqbcore.so
         run: |
           echo "=== Building libqbcore.so ==="
           cd $GITHUB_WORKSPACE
-          
-          # Debug: print env vars
-          echo "BOOST_DIR: $BOOST_DIR"
-          echo "BOOST_LIB_DIR: $BOOST_LIB_DIR"
-          echo "OPENSSL_DIR: $OPENSSL_DIR"
-          
           mkdir -p app/src/main/cpp/build
           cd app/src/main/cpp/build
           
@@ -120,17 +56,15 @@ jobs:
             -DANDROID_ABI=$ABI \
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
-            -DBOOST_ROOT=${{ env.BOOST_DIR }} \
-            -DBOOST_LIB_DIR=${{ env.BOOST_LIB_DIR }} \
-            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }} \
-            -DCMAKE_VERBOSE_LOGGING=ON
+            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }}
           
-          echo "=== CMake output ==="
-          cmake --build . --target qbcore -- -VERBOSE=1 2>&1 | tail -100
+          cmake --build . --target qbcore
+          
+          echo "=== libqbcore.so ==="
+          ls -lh libqbcore.so
+          file libqbcore.so
+          readelf -d libqbcore.so | grep NEEDED
 
-      # -----------------------
-      # Stage 3: Upload native artifact
-      # -----------------------
       - name: Upload native artifact
         uses: actions/upload-artifact@v4
         with:
@@ -143,9 +77,6 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      # -----------------------
-      # Stage 1: Checkout & Setup
-      # -----------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -160,29 +91,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y unzip wget
           export ANDROID_HOME=/usr/local/lib/android/sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
 
-      # -----------------------
-      # Stage 3: Download native artifact
-      # -----------------------
       - name: Download native artifact
         uses: actions/download-artifact@v4
         with:
           name: android-native-arm64-v8a
           path: app/src/main/jniLibs/arm64-v8a
 
-      # -----------------------
-      # Stage 4: Build APK
-      # -----------------------
       - name: Build APK
         run: |
           cd $GITHUB_WORKSPACE/app
-          ls -la ../src/main/jniLibs/arm64-v8a/
           ./gradlew assembleDebug
 
-      # -----------------------
-      # Stage 4: Upload APK
-      # -----------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
