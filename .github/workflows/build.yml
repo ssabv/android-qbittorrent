@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: 'Build step (1=hello-jni, 2=openssl, 3=boost, 4=libtorrent)'
+        description: 'Build step'
         default: '1'
         required: false
 
@@ -56,90 +56,113 @@ jobs:
         echo "Toolchain: $TOOLCHAIN"
         ls $TOOLCHAIN/bin/aarch64-linux-android*-clang 2>/dev/null | head -5
 
-    - name: Build Step 1 - Hello JNI
+    - name: Build Step 1 - Download OpenSSL static libs
       run: |
         set -e
-        echo "=== Step 1: Building hello-jni.so ==="
-        mkdir -p /tmp/hello-jni
-        printf '#include <stdio.h>\nint sayHello() { printf("Hello from JNI!\\n"); return 42; }\n' > /tmp/hello-jni/hello.c
-        printf 'cmake_minimum_required(VERSION 3.22.1)\nproject(hello-jni)\nadd_library(hello-jni SHARED hello.c)\n' > /tmp/hello-jni/CMakeLists.txt
-        mkdir -p /tmp/hello-jni/build
-        cd /tmp/hello-jni/build
-        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
-        cmake .. \
-          -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
-          -DANDROID_PLATFORM=android-24 \
-          -DANDROID_ABI=arm64-v8a \
-          -DCMAKE_BUILD_TYPE=Release
-        cmake --build . -- -j$(nproc) 2>&1
-        SO_FILE=$(find . -name "*.so" 2>/dev/null | head -1)
-        echo "Found SO: $SO_FILE"
+        echo "=== Step 1: Getting OpenSSL for Android arm64-v8a ==="
 
-    - name: Build Step 2 - OpenSSL
-      run: |
-        set -e
-        echo "=== Step 2: Getting OpenSSL for Android arm64-v8a ==="
-        
         cd /tmp
-        
+
         echo "=== Downloading OpenSSL 3.4.1 static libs for arm64-v8a ==="
         curl -fsSL "https://github.com/217heidai/openssl_for_android/releases/download/3.4.1/OpenSSL_3.4.1_arm64-v8a.tar.gz" -o openssl-arm64.tar.gz
-        
+
         echo "=== Extracting ==="
         mkdir -p openssl-arm64 && tar -xzf openssl-arm64.tar.gz -C openssl-arm64 --strip-components=1
-        
+
         echo "=== Checking contents ==="
         ls -la openssl-arm64/
-        ls -la openssl-arm64/lib/ 2>/dev/null || ls -la openssl-arm64/ | grep -v "^d"
-        
-        if [ -d "openssl-arm64/lib" ]; then
-          SSL_LIB="$PWD/openssl-arm64/lib/libssl.a"
-          CRYPTO_LIB="$PWD/openssl-arm64/lib/libcrypto.a"
-        elif [ -f "openssl-arm64/libssl.a" ]; then
-          SSL_LIB="$PWD/openssl-arm64/libssl.a"
-          CRYPTO_LIB="$PWD/openssl-arm64/libcrypto.a"
-        else
-          SSL_LIB=""
-          CRYPTO_LIB=""
-        fi
-        
+        ls -la openssl-arm64/lib/
+
+        SSL_LIB="$PWD/openssl-arm64/lib/libssl.a"
+        CRYPTO_LIB="$PWD/openssl-arm64/lib/libcrypto.a"
+
         echo "=== Verifying static libs ==="
-        if [ -n "$SSL_LIB" ] && [ -f "$SSL_LIB" ]; then
+        if [ -f "$SSL_LIB" ]; then
           echo "FOUND libssl.a: $SSL_LIB"
           file "$SSL_LIB"
           ls -lh "$SSL_LIB"
         else
-          echo "ERROR: libssl.a not found"
+          echo "ERROR: libssl.a not found at $SSL_LIB"
           exit 1
         fi
-        
-        if [ -n "$CRYPTO_LIB" ] && [ -f "$CRYPTO_LIB" ]; then
+
+        if [ -f "$CRYPTO_LIB" ]; then
           echo "FOUND libcrypto.a: $CRYPTO_LIB"
           file "$CRYPTO_LIB"
           ls -lh "$CRYPTO_LIB"
         else
-          echo "ERROR: libcrypto.a not found"
+          echo "ERROR: libcrypto.a not found at $CRYPTO_LIB"
           exit 1
         fi
-        
+
         OPENSSL_DIR="$PWD/openssl-arm64"
         echo "OPENSSL_DIR=$OPENSSL_DIR" >> $GITHUB_ENV
+        echo "Set OPENSSL_DIR=$OPENSSL_DIR"
 
-    - name: Copy to jniLibs
+    - name: Build Step 2 - Build libqbcore.so with OpenSSL static linking
       run: |
-        mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-        
-        SO_FILE=$(find /tmp/hello-jni/build -name "*.so" 2>/dev/null | head -1)
-        if [ -n "$SO_FILE" ] && [ -f "$SO_FILE" ]; then
-          cp "$SO_FILE" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
-          echo "Copied libhello-jni.so"
+        set -e
+        echo "=== Step 2: Building libqbcore.so with OpenSSL static linking ==="
+
+        cd $GITHUB_WORKSPACE
+        NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
+
+        echo "OPENSSL_DIR=$OPENSSL_DIR"
+
+        mkdir -p app/src/main/cpp/build
+        cd app/src/main/cpp/build
+
+        cmake .. \
+          -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+          -DANDROID_PLATFORM=android-24 \
+          -DANDROID_ABI=arm64-v8a \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DOPENSSL_DIR=$OPENSSL_DIR
+
+        echo "=== CMake configuration ==="
+        head -30 CMakeFiles/qbcore.dir/flags.make 2>/dev/null || echo "No flags.make found"
+
+        echo "=== Building qbcore ==="
+        cmake --build . -- -j$(nproc) 2>&1
+
+        echo "=== Checking built library ==="
+        QBCORE_SO=$(find . -name "libqbcore.so" 2>/dev/null | head -1)
+        if [ -n "$QBCORE_SO" ] && [ -f "$QBCORE_SO" ]; then
+          echo "SUCCESS: Built $QBCORE_SO"
+          ls -lh "$QBCORE_SO"
+          file "$QBCORE_SO"
+        else
+          echo "ERROR: libqbcore.so not found after build"
+          ls -la
+          find . -name "*.so" 2>/dev/null
+          exit 1
         fi
-        
-        echo "=== jniLibs/arm64-v8a contents ==="
+
+        echo "=== readelf -d libqbcore.so ==="
+        readelf -d "$QBCORE_SO" | head -20
+
+        echo "=== Required libraries ==="
+        readelf -d "$QBCORE_SO" | grep "NEEDED"
+
+        echo "=== Verifying: no libssl.so or libcrypto.so ==="
+        if readelf -d "$QBCORE_SO" | grep -q "libssl.so\|libcrypto.so"; then
+          echo "ERROR: libqbcore.so depends on libssl.so or libcrypto.so (should be statically linked)"
+          exit 1
+        else
+          echo "GOOD: libqbcore.so does NOT depend on libssl.so or libcrypto.so"
+        fi
+
+        echo "=== Verifying: has libc++_shared.so ==="
+        if readelf -d "$QBCORE_SO" | grep -q "libc++_shared.so"; then
+          echo "GOOD: libqbcore.so depends on libc++_shared.so"
+        else
+          echo "WARNING: libqbcore.so does not depend on libc++_shared.so"
+        fi
+
+        echo "=== Copying to jniLibs ==="
+        mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
+        cp "$QBCORE_SO" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
         ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
-        
-        echo "=== OpenSSL static libs available at $OPENSSL_DIR ==="
-        find "$OPENSSL_DIR" -name "*.a" 2>/dev/null
 
     - name: Upload native artifact
       uses: actions/upload-artifact@v4
@@ -180,39 +203,29 @@ jobs:
         name: android-native-arm64-v8a
         path: app/src/main/jniLibs/arm64-v8a
 
-    - name: Check downloaded files
+    - name: Build APK
       run: |
         echo "=== Downloaded jniLibs ==="
         ls -la app/src/main/jniLibs/arm64-v8a/
-        
-        echo "=== Verify libhello-jni.so ==="
-        if [ -f "app/src/main/jniLibs/arm64-v8a/libhello-jni.so" ]; then
-          echo "SUCCESS: libhello-jni.so exists"
-          file app/src/main/jniLibs/arm64-v8a/libhello-jni.so
-          readelf -d app/src/main/jniLibs/arm64-v8a/libhello-jni.so | head -10
+
+        echo "=== Verify libqbcore.so ==="
+        if [ -f "app/src/main/jniLibs/arm64-v8a/libqbcore.so" ]; then
+          echo "SUCCESS: libqbcore.so exists"
+          file app/src/main/jniLibs/arm64-v8a/libqbcore.so
+          readelf -d app/src/main/jniLibs/arm64-v8a/libqbcore.so | head -20
         else
-          echo "ERROR: libhello-jni.so not found!"
+          echo "ERROR: libqbcore.so not found!"
           exit 1
         fi
-        
+
         echo "=== Build APK ==="
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export JAVA_HOME=$JAVA_HOME_17_X64
         chmod +x gradlew
-        ./gradlew assembleDebug --no-daemon 2>&1 | tail -50
-        
+        ./gradlew assembleDebug --no-daemon 2>&1 | tail -80
+
         echo "=== APK Build Complete ==="
         ls -la app/build/outputs/apk/debug/ 2>/dev/null || echo "APK dir not found"
-
-    - name: Build APK
-      run: |
-        export ANDROID_HOME=$ANDROID_SDK_ROOT
-        export JAVA_HOME=$JAVA_HOME_17
-        chmod +x gradlew
-        echo "=== Starting Gradle build ==="
-        ./gradlew assembleDebug --no-daemon 2>&1 | tee /tmp/gradle-output.txt
-        echo "=== Gradle output (last 200 lines) ==="
-        tail -200 /tmp/gradle-output.txt
 
     - name: Upload APK
       uses: actions/upload-artifact@v4

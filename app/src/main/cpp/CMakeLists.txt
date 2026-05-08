@@ -19,6 +19,14 @@ find_library(log-lib log)
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_compile_options(-fPIC -fvisibility=hidden)
 
+set(OPENSSL_ROOT_DIR "$ENV{OPENSSL_DIR}")
+set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include")
+set(OPENSSL_LIB_DIR "${OPENSSL_ROOT_DIR}/lib")
+
+if(EXISTS "${OPENSSL_INCLUDE_DIR}")
+    include_directories(${OPENSSL_INCLUDE_DIR})
+endif()
+
 add_library(
     qbcore
     SHARED
@@ -35,7 +43,17 @@ target_link_options(qbcore PRIVATE
     -Wl,--gc-sections
 )
 
-target_link_libraries(qbcore ${log-lib})
+target_link_libraries(qbcore
+    ${log-lib}
+    c++_shared
+)
+
+if(EXISTS "${OPENSSL_LIB_DIR}/libssl.a")
+    target_link_libraries(qbcore
+        "${OPENSSL_LIB_DIR}/libssl.a"
+        "${OPENSSL_LIB_DIR}/libcrypto.a"
+    )
+endif()
 
 add_custom_command(TARGET qbcore POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Built qBittorrent Core"
