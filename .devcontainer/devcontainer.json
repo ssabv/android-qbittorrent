@@ -1,0 +1,27 @@
+{
+  "name": "Android qBittorrent Development",
+  "image": "mcr.microsoft.com/devcontainers/android:0.204.9",
+  "features": {
+    "ghcr.io/devcontainers/features/android-sdk:1": {
+      "platform": "android-35",
+      "ndk": "27",
+      "cmake": "3.22.1"
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17"
+    },
+    "ghcr.io/devcontainers/features/gradle:1": {
+      "version": "8.4"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "kotlin Foundation.kotlinter",
+        "vscjava.vscode-android",
+        "mathiasfroslie.gradient-highlight"
+      ]
+    }
+  },
+  "postCreateCommand": "export ANDROID_HOME=/usr/local/android-sdk && export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools && echo 'ANDROID_HOME=/usr/local/android-sdk' >> ~/.bashrc"
+}
