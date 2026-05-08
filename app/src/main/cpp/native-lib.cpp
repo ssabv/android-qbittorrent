@@ -6,7 +6,7 @@
 #include <cstring>
 #include <android/log.h>
 
-#include "qbcore.h"
+#include "qbittorrent/qbcore.h"
 
 #define LOG_TAG "qBittorrent"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)

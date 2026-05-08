@@ -12,6 +12,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+include_directories(${CMAKE_SOURCE_DIR})
+
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_compile_options(-fPIC -fvisibility=hidden)
 
@@ -19,6 +21,7 @@ add_library(
     qbcore
     SHARED
     native-lib.cpp
+    qbittorrent/qbcore.cpp
 )
 
 target_compile_options(qbcore PRIVATE
