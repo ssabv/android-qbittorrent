@@ -44,17 +44,14 @@ jobs:
       run: |
         echo "ANDROID_HOME: $ANDROID_HOME"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-
         NDK_VERSION="27.0.12077973"
         NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-
         if [ ! -d "$NDK_PATH" ]; then
           echo "ERROR: NDK version $NDK_VERSION not found!"
           ls $ANDROID_HOME/ndk/ 2>/dev/null || echo "No NDKs found"
           exit 1
         fi
         echo "Using NDK: $NDK_PATH"
-
         CLANGPP=$(find $NDK_PATH -name "clang++" -type f 2>/dev/null | head -1)
         if [ -n "$CLANGPP" ]; then
           echo "Found clang++: $CLANGPP"
@@ -63,7 +60,6 @@ jobs:
           echo "ERROR: clang++ not found in NDK"
           exit 1
         fi
-
         if command -v cmake &> /dev/null; then
           cmake --version | head -3
         else
@@ -73,42 +69,30 @@ jobs:
 
     - name: Build Step 1 - Hello JNI
       run: |
+        set -e
         echo "=== Step 1: Building hello-jni.so ==="
-
         mkdir -p /tmp/hello-jni
-        cd /tmp/hello-jni
-
-        cat > hello.c << 'EOF'
-#include <stdio.h>
-int sayHello() { printf("Hello from JNI!\n"); return 42; }
-EOF
-        cat > CMakeLists.txt << 'EOF'
-cmake_minimum_required(VERSION 3.22.1)
-project(hello-jni)
-add_library(hello-jni SHARED hello.c)
-EOF
-
-        mkdir -p build
-        cd build
-
+        printf '#include <stdio.h>\nint sayHello() { printf("Hello from JNI!\\n"); return 42; }\n' > /tmp/hello-jni/hello.c
+        printf 'cmake_minimum_required(VERSION 3.22.1)\nproject(hello-jni)\nadd_library(hello-jni SHARED hello.c)\n' > /tmp/hello-jni/CMakeLists.txt
+        cat /tmp/hello-jni/hello.c
+        cat /tmp/hello-jni/CMakeLists.txt
+        mkdir -p /tmp/hello-jni/build
+        cd /tmp/hello-jni/build
         NDK_PATH=$ANDROID_HOME/ndk/27.0.12077973
-
         cmake .. \
           -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
           -DANDROID_PLATFORM=android-24 \
           -DANDROID_ABI=arm64-v8a \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_VERBOSE_MAKEFILE=ON
-
         cmake --build . -- -j$(nproc) 2>&1
-
         SO_FILE=$(find . -name "*.so" 2>/dev/null | head -1)
         echo "Found SO: $SO_FILE"
+        ls -la
 
     - name: Copy to jniLibs
       run: |
         mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a
-
         SO_FILE=$(find /tmp/hello-jni/build -name "*.so" 2>/dev/null | head -1)
         if [ -n "$SO_FILE" ] && [ -f "$SO_FILE" ]; then
           cp "$SO_FILE" $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhello-jni.so
@@ -116,7 +100,7 @@ EOF
           echo "SUCCESS: Copied libhello-jni.so"
         else
           echo "ERROR: No .so file found to copy"
-          ls -la /tmp/hello-jni/build/
+          ls -la /tmp/hello-jni/build/ 2>/dev/null || echo "build dir not found"
           exit 1
         fi
 
@@ -163,7 +147,6 @@ EOF
       run: |
         echo "=== Downloaded jniLibs ==="
         ls -la app/src/main/jniLibs/arm64-v8a/
-
         if [ ! -f "app/src/main/jniLibs/arm64-v8a/libhello-jni.so" ]; then
           echo "ERROR: libhello-jni.so not found!"
           exit 1
@@ -175,7 +158,6 @@ EOF
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export JAVA_HOME=$JAVA_HOME_17
         chmod +x gradlew
-
         echo "=== Starting Gradle build ==="
         ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
 
