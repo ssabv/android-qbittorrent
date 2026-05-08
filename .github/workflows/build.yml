@@ -56,7 +56,7 @@ jobs:
             -DANDROID_ABI=$ABI \
             -DANDROID_PLATFORM=android-$ANDROID_API \
             -DANDROID_STL=c++_shared \
-            -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_DIR }}
+            -DOPENSSL_DIR=${{ env.OPENSSL_DIR }}
           
           cmake --build . --target qbcore
           
