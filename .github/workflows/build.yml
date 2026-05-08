@@ -94,10 +94,12 @@ jobs:
         with:
           name: android-native-arm64-v8a
           path: app/src/main/jniLibs/arm64-v8a
+          merge-multiple: true
 
       - name: Verify download
         run: |
           ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/*.so 2>/dev/null || echo "No .so files found"
 
       - name: Build APK
         run: |
