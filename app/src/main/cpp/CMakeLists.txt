@@ -19,10 +19,12 @@ find_library(log-lib log)
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_compile_options(-fPIC -fvisibility=hidden)
 
+# OpenSSL from environment variable OPENSSL_DIR
 set(OPENSSL_ROOT_DIR "$ENV{OPENSSL_DIR}")
 set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include")
 set(OPENSSL_LIB_DIR "${OPENSSL_ROOT_DIR}/lib")
 
+# Boost (optional)
 set(BOOST_DIR "$ENV{BOOST_DIR}")
 set(BOOST_LIB_DIR "$ENV{BOOST_LIB_DIR}")
 
@@ -56,18 +58,22 @@ target_link_options(qbcore PRIVATE
     -Wl,--gc-sections
 )
 
+# Link system libs only. C++ STL handled by ANDROID_STL cmake variable.
 target_link_libraries(qbcore
     ${log-lib}
-    c++_shared
 )
 
+# Link OpenSSL static libs
 if(EXISTS "${OPENSSL_LIB_DIR}/libssl.a")
     target_link_libraries(qbcore
         "${OPENSSL_LIB_DIR}/libssl.a"
         "${OPENSSL_LIB_DIR}/libcrypto.a"
     )
+else()
+    message(WARNING "OpenSSL static libs not found at ${OPENSSL_LIB_DIR}")
 endif()
 
+# Link Boost (optional)
 if(BOOST_LIB_DIR AND EXISTS "${BOOST_LIB_DIR}")
     if(EXISTS "${BOOST_LIB_DIR}/libboost_system.a")
         target_link_libraries(qbcore
