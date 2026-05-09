@@ -18,7 +18,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++17"
-                arguments "-DANDROID_STL=c++_shared", "-DANDROID_TOOLCHAIN=clang"
+                arguments "-DANDROID_STL=c++_static", "-DANDROID_TOOLCHAIN=clang"
             }
         }
     }
@@ -52,12 +52,6 @@ android {
         main {
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
-    }
-
-    packagingOptions {
-        pickFirst 'lib/x86/libc++_shared.so'
-        pickFirst 'lib/x86_64/libc++_shared.so'
-        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
     }
 }
 
