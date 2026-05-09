@@ -143,6 +143,8 @@ jobs:
           path: app/src/main/jniLibs/arm64-v8a
 
       - name: Verify & Build APK
+        env:
+          CI_SKIP_NATIVE_BUILD: "1"
         run: |
           # Verify native lib
           SOFILE="app/src/main/jniLibs/arm64-v8a/libqbcore.so"
@@ -154,16 +156,18 @@ jobs:
           echo "OK: libqbcore.so found"
           file "$SOFILE"
 
-          # Build APK
+          # Build APK (skip native build — using prebuilt from jniLibs)
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon 2>&1 | tail -80
 
           # Show output
-          ls -la app/build/outputs/apk/debug/ 2>/dev/null || echo "WARNING: APK output dir not found"
+          APK_DIR="app/build/outputs/apk/debug"
+          ls -la "$APK_DIR/" 2>/dev/null || echo "ERROR: APK output dir not found at $APK_DIR"
+          find app/build/outputs -name "*.apk" 2>/dev/null
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
