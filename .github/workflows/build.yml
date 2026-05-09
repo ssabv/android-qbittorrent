@@ -78,8 +78,8 @@ jobs:
       - name: Build libqbcore.so (CMake + NDK)
         run: |
           set -e
-          mkdir -p build
-          cd build
+          mkdir -p app/src/main/cpp/build
+          cd app/src/main/cpp/build
 
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
@@ -112,7 +112,7 @@ jobs:
       - name: Prepare jniLibs
         run: |
           mkdir -p app/src/main/jniLibs/arm64-v8a
-          cp build/libqbcore.so app/src/main/jniLibs/arm64-v8a/
+          cp app/src/main/cpp/build/libqbcore.so app/src/main/jniLibs/arm64-v8a/
           ls -la app/src/main/jniLibs/arm64-v8a/
 
       - name: Upload native artifact
