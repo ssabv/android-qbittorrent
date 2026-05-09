@@ -54,8 +54,10 @@ target_compile_options(qbcore PRIVATE
     -fdata-sections
 )
 
+# Android 16 (API 36) requires 16KB page alignment
 target_link_options(qbcore PRIVATE
     -Wl,--gc-sections
+    -Wl,-z,max-page-size=16384
 )
 
 # Link system libs only. C++ STL handled by ANDROID_STL cmake variable.
